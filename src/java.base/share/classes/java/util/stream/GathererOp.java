@@ -25,6 +25,7 @@
 package java.util.stream;
 
 import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.annotation.Stable;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -128,18 +129,19 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
         }
     }
 
-    static final class GatherSink<T, A, R> implements Sink<T>, Gatherer.Downstream<R> {
-        private final Sink<R> sink;
-        private final Gatherer<T, A, R> gatherer;
-        private final Integrator<A, T, R> integrator; // Optimization: reuse
-        private A state;
-        private boolean proceed = true;
-        private boolean downstreamProceed = true;
+    record GatherSink<T, A, R>(Gatherer<T, A, R> gatherer,
+                               Sink<R> sink,
+                               Integrator<A, T, R> integrator,
+                               MutableHolder<A> mutableHolder) implements Sink<T>, Gatherer.Downstream<R> {
+
+        final static class MutableHolder<A> {
+            A state;
+            boolean proceed = true;
+            boolean downstreamProceed = true;
+        }
 
         GatherSink(Gatherer<T, A, R> gatherer, Sink<R> sink) {
-            this.gatherer = gatherer;
-            this.sink = sink;
-            this.integrator = gatherer.integrator();
+            this(gatherer, sink, gatherer.integrator(), new MutableHolder<>());
         }
 
         // java.util.stream.Sink contract below:
@@ -148,7 +150,7 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
         public void begin(long size) {
             final var initializer = gatherer.initializer();
             if (initializer != Gatherer.defaultInitializer()) // Optimization
-                state = initializer.get();
+                mutableHolder.state = initializer.get();
             sink.begin(size);
         }
 
@@ -161,38 +163,38 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
              * As of writing this, taking `greedy` or `stateless` into
              * consideration at this point doesn't yield any performance gains.
              */
-            proceed &= integrator.integrate(state, t, this);
+            mutableHolder.proceed &= integrator.integrate(mutableHolder.state, t, this);
         }
 
         @Override
         public boolean cancellationRequested() {
-            return cancellationRequested(proceed && downstreamProceed);
+            return cancellationRequested(mutableHolder.proceed && mutableHolder.downstreamProceed);
         }
 
         private boolean cancellationRequested(boolean knownProceed) {
             // Highly performance sensitive
-            return !(knownProceed && (!sink.cancellationRequested() || (downstreamProceed = false)));
+            return !(knownProceed && (!sink.cancellationRequested() || (mutableHolder.downstreamProceed = false)));
         }
 
         @Override
         public void end() {
             final var finisher = gatherer.finisher();
             if (finisher != Gatherer.<A, R>defaultFinisher()) // Optimization
-                finisher.accept(state, this);
+                finisher.accept(mutableHolder.state, this);
             sink.end();
-            state = null; // GC assistance
+            mutableHolder.state = null; // GC assistance
         }
 
         // Gatherer.Sink contract below:
 
         @Override
         public boolean isRejecting() {
-            return !downstreamProceed;
+            return !mutableHolder.downstreamProceed;
         }
 
         @Override
         public boolean push(R r) {
-            var p = downstreamProceed;
+            var p = mutableHolder.downstreamProceed;
             if (p)
                 sink.accept(r);
             return !cancellationRequested(p);
@@ -445,12 +447,17 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
          */
         @SuppressWarnings("serial")
         final class Hybrid extends CountedCompleter<Sequential> {
+            @Stable
             private final long targetSize;
+            @Stable
             private final Hybrid leftPredecessor;
+            @Stable
             private final AtomicBoolean cancelled;
+            @Stable
             private final Sequential localResult;
 
             private Spliterator<T> spliterator;
+            @Stable // Might be stable as a second change is never observed by code logic
             private Hybrid next;
 
             private static final VarHandle NEXT;
@@ -460,11 +467,11 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
                     MethodHandles.Lookup l = MethodHandles.lookup();
                     NEXT = l.findVarHandle(Hybrid.class, "next", Hybrid.class);
                 } catch (Exception e) {
-                    throw new InternalError(e);
+                    throw new ExceptionInInitializerError(e);
                 }
             }
 
-            protected Hybrid(Spliterator<T> spliterator) {
+            private Hybrid(Spliterator<T> spliterator) {
                 super(null);
                 this.spliterator = spliterator;
                 this.targetSize =
@@ -610,11 +617,16 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
          */
         @SuppressWarnings("serial")
         final class Parallel extends CountedCompleter<Sequential> {
-            private Spliterator<T> spliterator;
+            @Stable
+            private final Spliterator<T> spliterator;
+            @Stable
             private Parallel leftChild; // Only non-null if rightChild is
+            @Stable
             private Parallel rightChild; // Only non-null if leftChild is
+            @Stable
             private Sequential localResult;
             private volatile boolean canceled;
+            @Stable
             private long targetSize; // lazily initialized
 
             private Parallel(Parallel parent, Spliterator<T> spliterator) {
@@ -625,7 +637,6 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
 
             Parallel(Spliterator<T> spliterator) {
                 super(null);
-                this.targetSize = 0L;
                 this.spliterator = spliterator;
             }
 
@@ -700,14 +711,14 @@ final class GathererOp<T, A, R> extends ReferencePipeline<T, R> {
 
             @Override
             public void onCompletion(CountedCompleter<?> caller) {
-                spliterator = null; // GC assistance
+                // spliterator = null; // GC assistance
                 if (leftChild != null) {
                     /* Results can only be null in the case where there's
                      * short-circuiting or when Gatherers are stateful but
                      * uses `null` as their state value.
                      */
                     localResult = merge(leftChild.localResult, rightChild.localResult);
-                    leftChild = rightChild = null; // GC assistance
+                    //leftChild = rightChild = null; // GC assistance
                 }
             }
 

@@ -27,6 +27,7 @@ package java.util.stream;
 import jdk.internal.access.SharedSecrets;
 import jdk.internal.javac.PreviewFeature;
 import jdk.internal.vm.annotation.ForceInline;
+import jdk.internal.vm.annotation.Stable;
 
 import java.util.ArrayDeque;
 import java.util.List;
@@ -178,7 +179,7 @@ public final class Gatherers {
         if (windowSize < 1)
             throw new IllegalArgumentException("'windowSize' must be greater than zero");
 
-        class SlidingWindow {
+        final class SlidingWindow {
             Object[] window;
             int at;
             boolean firstWindow;
@@ -267,14 +268,14 @@ public final class Gatherers {
         Objects.requireNonNull(initial, "'initial' must not be null");
         Objects.requireNonNull(folder, "'folder' must not be null");
 
-        class State {
+        final class State {
             R value = initial.get();
             State() {}
         }
 
         return Gatherer.ofSequential(
                 State::new,
-                Integrator.ofGreedy((state, element, downstream) -> {
+                Integrator.ofGreedy((state, element, _) -> {
                     state.value = folder.apply(state.value, element);
                     return true;
                 }),
@@ -314,7 +315,7 @@ public final class Gatherers {
         Objects.requireNonNull(initial, "'initial' must not be null");
         Objects.requireNonNull(scanner, "'scanner' must not be null");
 
-        class State {
+        final class State {
             R current = initial.get();
             boolean integrate(T element, Downstream<? super R> downstream) {
                 return downstream.push(current = scanner.apply(current, element));
@@ -357,20 +358,24 @@ public final class Gatherers {
 
         Objects.requireNonNull(mapper, "'mapper' must not be null");
 
-        class State {
-            // ArrayDeque default initial size is 16
-            final ArrayDeque<Future<R>> window =
-                    new ArrayDeque<>(Math.min(maxConcurrency, 16));
-            final Semaphore windowLock = new Semaphore(maxConcurrency);
+        record State<T, R>(ArrayDeque<Future<R>> window,
+                           Semaphore windowLock,
+                           Function<? super T, ? extends R> mapper) {
 
-            final boolean integrate(T element,
+            public State(int maxConcurrency,
+                         final Function<? super T, ? extends R> mapper) {
+                // ArrayDeque default initial size is 16
+                this(new ArrayDeque<>(Math.min(maxConcurrency, 16)), new Semaphore(maxConcurrency), mapper);
+            }
+
+            boolean integrate(T element,
                                     Downstream<? super R> downstream) {
                 if (!downstream.isRejecting())
                     createTaskFor(element);
                 return flush(0, downstream);
             }
 
-            final void createTaskFor(T element) {
+            void createTaskFor(T element) {
                 windowLock.acquireUninterruptibly();
 
                 var task = new FutureTask<R>(() -> {
@@ -387,7 +392,7 @@ public final class Gatherers {
                 Thread.startVirtualThread(task);
             }
 
-            final boolean flush(long atLeastN,
+            boolean flush(long atLeastN,
                                 Downstream<? super R> downstream) {
                 boolean proceed = !downstream.isRejecting();
                 boolean interrupted = false;
@@ -429,8 +434,8 @@ public final class Gatherers {
         }
 
         return Gatherer.ofSequential(
-                State::new,
-                Integrator.<State, T, R>ofGreedy(State::integrate),
+                () -> new State<>(maxConcurrency, mapper),
+                Integrator.ofGreedy(State::integrate),
                 (state, downstream) -> state.flush(Long.MAX_VALUE, downstream)
         );
     }
@@ -507,6 +512,7 @@ public final class Gatherers {
         private final Gatherer<T, A, ? extends R> left;
         private final Gatherer<? super R, AA, ? extends RR> right;
         // FIXME change `impl` to a computed constant when available
+        @Stable
         private GathererImpl<T, Object, RR> impl;
 
         static <T, A, R, AA, RR> Composite<T, A, R, AA, RR> of(
@@ -561,7 +567,7 @@ public final class Gatherers {
             }
         }
 
-        static final <T, A, R, AA, RR> GathererImpl<T, ?, RR> impl(
+        static <T, A, R, AA, RR> GathererImpl<T, ?, RR> impl(
                 Gatherer<T, A, R> left, Gatherer<? super R, AA, RR> right) {
             final var leftInitializer = left.initializer();
             final var leftIntegrator = left.integrator();
@@ -588,7 +594,7 @@ public final class Gatherers {
             if (leftStateless && rightStateless && leftGreedy && rightGreedy) {
                 return new GathererImpl<>(
                     Gatherer.defaultInitializer(),
-                    Gatherer.Integrator.ofGreedy((unused, element, downstream) ->
+                    Gatherer.Integrator.ofGreedy((_, element, downstream) ->
                         leftIntegrator.integrate(
                                 null,
                                 element,
@@ -602,7 +608,7 @@ public final class Gatherers {
                     (leftFinisher == Gatherer.<A,R>defaultFinisher()
                     && rightFinisher == Gatherer.<AA,RR>defaultFinisher())
                             ? Gatherer.defaultFinisher()
-                            : (unused, downstream) -> {
+                            : (_, downstream) -> {
                         if (leftFinisher != Gatherer.<A,R>defaultFinisher())
                             leftFinisher.accept(
                                     null,
@@ -612,8 +618,10 @@ public final class Gatherers {
                     }
                 );
             } else {
-                class State {
+                final class State {
+                    @Stable
                     final A leftState;
+                    @Stable
                     final AA rightState;
                     boolean leftProceed;
                     boolean rightProceed;
