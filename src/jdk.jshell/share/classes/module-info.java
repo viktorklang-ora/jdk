@@ -23,6 +23,8 @@
  * questions.
  */
 
+import jdk.internal.javac.ParticipatesInPreview;
+
 /**
  * Provides the <em>{@index jshell jshell tool}</em> tool for evaluating
  * snippets of Java code, and defines a JDK-specific API for modeling and
@@ -33,7 +35,7 @@
  * and programmatically launching the existing Java shell tool.
  * <p>
  *     The {@link jdk.jshell} is the package for creating 'snippet' evaluating tools.
- *     Generally, this is only package that would be needed for creating tools.
+ *     Generally, this is the only package that would be needed for creating tools.
  * </p>
  * <p>
  *     The {@link jdk.jshell.spi} package specifies a Service Provider Interface (SPI)
@@ -63,6 +65,7 @@
  * @moduleGraph
  * @since 9
  */
+@ParticipatesInPreview
 module jdk.jshell {
     requires java.logging;
     requires jdk.compiler;
@@ -88,4 +91,5 @@ module jdk.jshell {
         jdk.jshell.execution.JdiExecutionControlProvider,
         jdk.jshell.execution.LocalExecutionControlProvider,
         jdk.jshell.execution.FailOverExecutionControlProvider;
+    provides jdk.internal.io.JdkConsoleProvider with jdk.jshell.execution.impl.ConsoleImpl.ConsoleProviderImpl;
 }

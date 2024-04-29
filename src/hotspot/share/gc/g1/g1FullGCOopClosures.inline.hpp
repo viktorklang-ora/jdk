@@ -28,10 +28,10 @@
 #include "gc/g1/g1FullGCOopClosures.hpp"
 
 #include "gc/g1/g1Allocator.inline.hpp"
-#include "gc/g1/g1FullCollector.inline.hpp"
 #include "gc/g1/g1ConcurrentMarkBitMap.inline.hpp"
+#include "gc/g1/g1FullCollector.inline.hpp"
 #include "gc/g1/g1FullGCMarker.inline.hpp"
-#include "gc/g1/heapRegionRemSet.inline.hpp"
+#include "gc/g1/g1HeapRegionRemSet.inline.hpp"
 #include "memory/iterator.inline.hpp"
 #include "memory/universe.hpp"
 #include "oops/access.inline.hpp"
@@ -49,26 +49,6 @@ inline void G1MarkAndPushClosure::do_oop(oop* p) {
 
 inline void G1MarkAndPushClosure::do_oop(narrowOop* p) {
   do_oop_work(p);
-}
-
-inline bool G1MarkAndPushClosure::do_metadata() {
-  return true;
-}
-
-inline void G1MarkAndPushClosure::do_klass(Klass* k) {
-  _marker->follow_klass(k);
-}
-
-inline void G1MarkAndPushClosure::do_cld(ClassLoaderData* cld) {
-  _marker->follow_cld(cld);
-}
-
-inline void G1MarkAndPushClosure::do_method(Method* m) {
-  m->record_gc_epoch();
-}
-
-inline void G1MarkAndPushClosure::do_nmethod(nmethod* nm) {
-  nm->follow_nmethod(this);
 }
 
 template <class T> inline void G1AdjustClosure::adjust_pointer(T* p) {
@@ -98,7 +78,7 @@ inline void G1AdjustClosure::do_oop(oop* p)       { do_oop_work(p); }
 inline void G1AdjustClosure::do_oop(narrowOop* p) { do_oop_work(p); }
 
 inline bool G1IsAliveClosure::do_object_b(oop p) {
-  return _bitmap->is_marked(p) || _collector->is_skip_marking(p);
+  return _bitmap->is_marked(p);
 }
 
 template<typename T>

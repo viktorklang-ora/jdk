@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -264,16 +264,16 @@ bool read_string(struct ps_prochandle* ph, uintptr_t addr, char* buf, size_t siz
 }
 
 #ifdef LINUX
-// mangled name of Arguments::SharedArchivePath
-#define SHARED_ARCHIVE_PATH_SYM "_ZN9Arguments17SharedArchivePathE"
+// mangled name of CDSConfig::_static_archive_path
+#define SHARED_ARCHIVE_PATH_SYM "_ZN9CDSConfig20_static_archive_pathE"
 #define USE_SHARED_SPACES_SYM "UseSharedSpaces"
 #define SHARED_BASE_ADDRESS_SYM "SharedBaseAddress"
 #define LIBJVM_NAME "/libjvm.so"
 #endif
 
 #ifdef __APPLE__
-// mangled name of Arguments::SharedArchivePath
-#define SHARED_ARCHIVE_PATH_SYM "__ZN9Arguments17SharedArchivePathE"
+// mangled name of CDSConfig::_static_archive_path
+#define SHARED_ARCHIVE_PATH_SYM "__ZN9CDSConfig20_static_archive_pathE"
 #define USE_SHARED_SPACES_SYM "_UseSharedSpaces"
 #define SHARED_BASE_ADDRESS_SYM "_SharedBaseAddress"
 #define LIBJVM_NAME "/libjvm.dylib"
@@ -386,17 +386,17 @@ bool init_classsharing_workaround(struct ps_prochandle* ph) {
       ph->core->classes_jsa_fd = fd;
       // add read-only maps from classes.jsa to the list of maps
       for (m = 0; m < NUM_CDS_REGIONS; m++) {
-        if (header._space[m]._read_only &&
-            !header._space[m]._is_heap_region &&
-            !header._space[m]._is_bitmap_region) {
+        if (header._regions[m]._read_only &&
+            !header._regions[m]._is_heap_region &&
+            !header._regions[m]._is_bitmap_region) {
           // With *some* linux versions, the core file doesn't include read-only mmap'ed
           // files regions, so let's add them here. This is harmless if the core file also
           // include these regions.
-          uintptr_t base = sharedBaseAddress + (uintptr_t) header._space[m]._mapping_offset;
-          size_t size = header._space[m]._used;
+          uintptr_t base = sharedBaseAddress + (uintptr_t) header._regions[m]._mapping_offset;
+          size_t size = header._regions[m]._used;
           // no need to worry about the fractional pages at-the-end.
           // possible fractional pages are handled by core_read_data.
-          add_class_share_map_info(ph, (off_t) header._space[m]._file_offset,
+          add_class_share_map_info(ph, (off_t) header._regions[m]._file_offset,
                                    base, size);
           print_debug("added a share archive map [%d] at 0x%lx (size 0x%lx bytes)\n", m, base, size);
         }

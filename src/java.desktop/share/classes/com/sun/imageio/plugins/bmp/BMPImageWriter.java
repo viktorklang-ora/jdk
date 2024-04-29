@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -986,7 +986,7 @@ public class BMPImageWriter extends ImageWriter implements BMPConstants {
                     /// Absolute Encoding for less than 3
                     /// treated as regular encoding
                     /// Do not include the last element since it will
-                    /// be inclued in the next encoding/run
+                    /// be included in the next encoding/run
                     for (int b=0;b<absVal;b++){
                         stream.writeByte(1);
                         stream.writeByte(absBuf[b]);
@@ -1145,7 +1145,7 @@ public class BMPImageWriter extends ImageWriter implements BMPConstants {
                     }
                 } else {
                     // odd runlength and the run ends here
-                    // runCount wont be > 254 since 256/255 case will
+                    // runCount won't be > 254 since 256/255 case will
                     // be taken care of in above code.
                     runCount++;
                     pixel = ( runVal1 << 4) | runVal2;
@@ -1418,8 +1418,8 @@ public class BMPImageWriter extends ImageWriter implements BMPConstants {
     /*
      * Returns preferred compression type for given image.
      * The default compression type is BI_RGB, but some image types can't be
-     * encodeed with using default compression without cahnge color resolution.
-     * For example, TYPE_USHORT_565_RGB may be encodeed only by using BI_BITFIELDS
+     * encoded using default compression without change of color resolution.
+     * For example, TYPE_USHORT_565_RGB may be encoded only by using BI_BITFIELDS
      * compression type.
      *
      * NB: we probably need to extend this method if we encounter other image
@@ -1440,7 +1440,7 @@ public class BMPImageWriter extends ImageWriter implements BMPConstants {
     /*
      * Check whether we can encode image of given type using compression method in question.
      *
-     * For example, TYPE_USHORT_565_RGB can be encodeed with BI_BITFIELDS compression only.
+     * For example, TYPE_USHORT_565_RGB can be encoded with BI_BITFIELDS compression only.
      *
      * NB: method should be extended if other cases when we can not encode
      *     with given compression will be discovered.

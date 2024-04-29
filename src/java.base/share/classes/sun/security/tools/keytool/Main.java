@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -405,26 +405,38 @@ public final class Main {
         collator.setStrength(Collator.PRIMARY);
     }
 
-    private Main() { }
-
     public static void main(String[] args) throws Exception {
         Main kt = new Main();
-        kt.run(args, System.out);
+        int exitCode = kt.run(args, System.out);
+        if (exitCode != 0) {
+            System.exit(exitCode);
+        }
     }
 
-    private void run(String[] args, PrintStream out) throws Exception {
+    private static class ExitException extends RuntimeException {
+        @java.io.Serial
+        static final long serialVersionUID = 0L;
+        private final int errorCode;
+        public ExitException(int errorCode) {
+            this.errorCode = errorCode;
+        }
+    }
+
+    public int run(String[] args, PrintStream out) throws Exception {
         try {
-            args = parseArgs(args);
+            parseArgs(args);
             if (command != null) {
                 doCommands(out);
             }
+        } catch (ExitException ee) {
+            return ee.errorCode;
         } catch (Exception e) {
             System.out.println(rb.getString("keytool.error.") + e);
             if (verbose) {
                 e.printStackTrace(System.out);
             }
             if (!debug) {
-                System.exit(1);
+                return 1;
             } else {
                 throw e;
             }
@@ -441,6 +453,7 @@ public final class Main {
                 ksStream.close();
             }
         }
+        return 0;
     }
 
     /**
@@ -1451,10 +1464,8 @@ public final class Main {
         Certificate signerCert = keyStore.getCertificate(alias);
         byte[] encoded = signerCert.getEncoded();
         X509CertImpl signerCertImpl = new X509CertImpl(encoded);
-        X509CertInfo signerCertInfo = (X509CertInfo)signerCertImpl.get(
-                X509CertImpl.NAME + "." + X509CertImpl.INFO);
-        X500Name issuer = (X500Name)signerCertInfo.get(X509CertInfo.SUBJECT + "." +
-                                           X509CertInfo.DN_NAME);
+        X509CertInfo signerCertInfo = signerCertImpl.getInfo();
+        X500Name issuer = signerCertInfo.getSubject();
 
         Date firstDate = getStartDate(startDate);
         Date lastDate = getLastDate(firstDate, validity);
@@ -1467,12 +1478,10 @@ public final class Main {
             sigAlgName = getCompatibleSigAlgName(privateKey);
         }
         X509CertInfo info = new X509CertInfo();
-        info.set(X509CertInfo.VALIDITY, interval);
-        info.set(X509CertInfo.SERIAL_NUMBER,
-                CertificateSerialNumber.newRandom64bit(new SecureRandom()));
-        info.set(X509CertInfo.VERSION,
-                    new CertificateVersion(CertificateVersion.V3));
-        info.set(X509CertInfo.ISSUER, issuer);
+        info.setValidity(interval);
+        info.setSerialNumber(CertificateSerialNumber.newRandom64bit(new SecureRandom()));
+        info.setVersion(new CertificateVersion(CertificateVersion.V3));
+        info.setIssuer(issuer);
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(in));
         boolean canRead = false;
@@ -1498,9 +1507,8 @@ public final class Main {
                 req.getSubjectPublicKeyInfo(), null, null, null);
         checkWeakConstraint(rb.getString("the.certificate.request"), req, cpcp);
 
-        info.set(X509CertInfo.KEY, new CertificateX509Key(req.getSubjectPublicKeyInfo()));
-        info.set(X509CertInfo.SUBJECT,
-                    dname==null?req.getSubjectName():new X500Name(dname));
+        info.setKey(new CertificateX509Key(req.getSubjectPublicKeyInfo()));
+        info.setSubject(dname==null ? req.getSubjectName() : new X500Name(dname));
         CertificateExtensions reqex = null;
         for (PKCS10Attribute attr : req.getAttributes().getAttributes()) {
             if (attr.getAttributeId().equals(PKCS9Attribute.EXTENSION_REQUEST_OID)) {
@@ -1540,9 +1548,9 @@ public final class Main {
                 v3ext,
                 subjectPubKey,
                 signerSubjectKeyId);
-        info.set(X509CertInfo.EXTENSIONS, ext);
-        X509CertImpl cert = new X509CertImpl(info);
-        cert.sign(privateKey, sigAlgName);
+        info.setExtensions(ext);
+        X509CertImpl cert = X509CertImpl
+                .newSigned(info, privateKey, sigAlgName);
         dumpCert(cert, out);
         for (Certificate ca: keyStore.getCertificateChain(alias)) {
             if (ca instanceof X509Certificate xca) {
@@ -1567,10 +1575,8 @@ public final class Main {
         Certificate signerCert = keyStore.getCertificate(alias);
         byte[] encoded = signerCert.getEncoded();
         X509CertImpl signerCertImpl = new X509CertImpl(encoded);
-        X509CertInfo signerCertInfo = (X509CertInfo)signerCertImpl.get(
-                X509CertImpl.NAME + "." + X509CertImpl.INFO);
-        X500Name owner = (X500Name)signerCertInfo.get(X509CertInfo.SUBJECT + "." +
-                                                      X509CertInfo.DN_NAME);
+        X509CertInfo signerCertInfo = signerCertImpl.getInfo();
+        X500Name owner = signerCertInfo.getSubject();
 
         Date firstDate = getStartDate(startDate);
         Date lastDate = getLastDate(firstDate, validity);
@@ -1589,19 +1595,27 @@ public final class Main {
             int d = id.indexOf(':');
             if (d >= 0) {
                 CRLExtensions ext = new CRLExtensions();
-                ext.set("Reason", new CRLReasonCodeExtension(Integer.parseInt(id.substring(d+1))));
+                int code = Integer.parseInt(id.substring(d+1));
+                if (code <= 0) {
+                    throw new Exception("Reason code must be positive");
+                }
+                ext.setExtension("Reason", new CRLReasonCodeExtension(code));
                 badCerts[i] = new X509CRLEntryImpl(new BigInteger(id.substring(0, d)),
                         firstDate, ext);
             } else {
                 badCerts[i] = new X509CRLEntryImpl(new BigInteger(ids.get(i)), firstDate);
             }
         }
-        X509CRLImpl crl = new X509CRLImpl(owner, firstDate, lastDate, badCerts);
-        crl.sign(privateKey, sigAlgName);
+        X509CRLImpl crl = X509CRLImpl.newSigned(
+                new X509CRLImpl.TBSCertList(owner, firstDate, lastDate, badCerts),
+                privateKey, sigAlgName);
         if (rfc) {
-            out.println("-----BEGIN X509 CRL-----");
-            out.println(Base64.getMimeEncoder(64, CRLF).encodeToString(crl.getEncodedInternal()));
-            out.println("-----END X509 CRL-----");
+            out.print("-----BEGIN X509 CRL-----");
+            out.print("\r\n");
+            out.print(Base64.getMimeEncoder(64, CRLF).encodeToString(crl.getEncodedInternal()));
+            out.print("\r\n");
+            out.print("-----END X509 CRL-----");
+            out.print("\r\n");
         } else {
             out.write(crl.getEncodedInternal());
         }
@@ -1839,6 +1853,11 @@ public final class Main {
                 useDefaultPBEAlgorithm = false;
             }
 
+            SecretKeyConstraintsParameters skcp =
+                    new SecretKeyConstraintsParameters(secKey);
+            checkWeakConstraint(rb.getString("the.generated.secretkey"),
+                    keyAlgName, skcp);
+
             if (verbose) {
                 MessageFormat form = new MessageFormat(rb.getString(
                     "Generated.keyAlgName.secret.key"));
@@ -1970,10 +1989,8 @@ public final class Main {
                 signerCertImpl = new X509CertImpl(signerCert.getEncoded());
             }
 
-            X509CertInfo signerCertInfo = (X509CertInfo)signerCertImpl.get(
-                    X509CertImpl.NAME + "." + X509CertImpl.INFO);
-            X500Name signerSubjectName = (X500Name)signerCertInfo.get(X509CertInfo.SUBJECT + "." +
-                    X509CertInfo.DN_NAME);
+            X509CertInfo signerCertInfo = signerCertImpl.getInfo();
+            X500Name signerSubjectName = signerCertInfo.getSubject();
 
             keypair = new CertAndKeyGen(keyAlgName, sigAlgName, providerName,
                     signerPrivateKey, signerSubjectName);
@@ -2066,7 +2083,7 @@ public final class Main {
      * Clones an entry
      * @param orig original alias
      * @param dest destination alias
-     * @changePassword if the password can be changed
+     * @param changePassword if the password can be changed
      */
     private void doCloneEntry(String orig, String dest, boolean changePassword)
         throws Exception
@@ -2666,8 +2683,7 @@ public final class Main {
         CRLDistributionPointsExtension ext =
                 X509CertImpl.toImpl(cert).getCRLDistributionPointsExtension();
         if (ext == null) return crls;
-        List<DistributionPoint> distPoints =
-                ext.get(CRLDistributionPointsExtension.POINTS);
+        List<DistributionPoint> distPoints = ext.getDistributionPoints();
         for (DistributionPoint o: distPoints) {
             GeneralNames names = o.getFullName();
             if (names != null) {
@@ -2771,9 +2787,12 @@ public final class Main {
             throws Exception {
         X509CRL xcrl = (X509CRL)crl;
         if (rfc) {
-            out.println("-----BEGIN X509 CRL-----");
-            out.println(Base64.getMimeEncoder(64, CRLF).encodeToString(xcrl.getEncoded()));
-            out.println("-----END X509 CRL-----");
+            out.print("-----BEGIN X509 CRL-----");
+            out.print("\r\n");
+            out.print(Base64.getMimeEncoder(64, CRLF).encodeToString(xcrl.getEncoded()));
+            out.print("\r\n");
+            out.print("-----END X509 CRL-----");
+            out.print("\r\n");
         } else {
             String s;
             if (crl instanceof X509CRLImpl x509crl) {
@@ -3202,50 +3221,44 @@ public final class Main {
         // (no public APIs available yet)
         byte[] encoded = oldCert.getEncoded();
         X509CertImpl certImpl = new X509CertImpl(encoded);
-        X509CertInfo certInfo = (X509CertInfo)certImpl.get(X509CertImpl.NAME
-                                                           + "." +
-                                                           X509CertImpl.INFO);
+        X509CertInfo certInfo = certImpl.getInfo();
 
         // Extend its validity
         Date firstDate = getStartDate(startDate);
         Date lastDate = getLastDate(firstDate, validity);
         CertificateValidity interval = new CertificateValidity(firstDate,
                                                                lastDate);
-        certInfo.set(X509CertInfo.VALIDITY, interval);
+        certInfo.setValidity(interval);
 
         // Make new serial number
-        certInfo.set(X509CertInfo.SERIAL_NUMBER,
+        certInfo.setSerialNumber(
                 CertificateSerialNumber.newRandom64bit(new SecureRandom()));
 
         // Set owner and issuer fields
         X500Name owner;
         if (dname == null) {
             // Get the owner name from the certificate
-            owner = (X500Name)certInfo.get(X509CertInfo.SUBJECT + "." +
-                                           X509CertInfo.DN_NAME);
+            owner = certInfo.getSubject();
         } else {
             // Use the owner name specified at the command line
             owner = new X500Name(dname);
-            certInfo.set(X509CertInfo.SUBJECT + "." +
-                         X509CertInfo.DN_NAME, owner);
+            certInfo.setSubject(owner);
         }
         // Make issuer same as owner (self-signed!)
-        certInfo.set(X509CertInfo.ISSUER + "." +
-                     X509CertInfo.DN_NAME, owner);
+        certInfo.setIssuer(owner);
 
-        certInfo.set(X509CertInfo.VERSION,
-                        new CertificateVersion(CertificateVersion.V3));
+        certInfo.setVersion(new CertificateVersion(CertificateVersion.V3));
 
         CertificateExtensions ext = createV3Extensions(
                 null,
-                (CertificateExtensions)certInfo.get(X509CertInfo.EXTENSIONS),
+                certInfo.getExtensions(),
                 v3ext,
                 oldCert.getPublicKey(),
                 null);
-        certInfo.set(X509CertInfo.EXTENSIONS, ext);
+        certInfo.setExtensions(ext);
         // Sign the new certificate
-        X509CertImpl newCert = new X509CertImpl(certInfo);
-        newCert.sign(privKey, sigAlgName);
+        X509CertImpl newCert = X509CertImpl.newSigned(
+                certInfo, privKey, sigAlgName);
 
         // Store the new certificate as a single-element certificate chain
         keyStore.setKeyEntry(alias, privKey,
@@ -3505,7 +3518,7 @@ public final class Main {
 
     /**
      * Prompts user for an input string from the command line (System.in)
-     * @prompt the prompt string printed
+     * @param prompt the prompt string printed
      * @return the string entered by the user, without the \n at the end
      */
     private String inputStringFromStdin(String prompt) throws Exception {
@@ -3634,11 +3647,8 @@ public final class Main {
         out.println(form.format(source));
 
         if (cert instanceof X509CertImpl impl) {
-            X509CertInfo certInfo = (X509CertInfo)impl.get(X509CertImpl.NAME
-                                                           + "." +
-                                                           X509CertImpl.INFO);
-            CertificateExtensions exts = (CertificateExtensions)
-                    certInfo.get(X509CertInfo.EXTENSIONS);
+            X509CertInfo certInfo = impl.getInfo();
+            CertificateExtensions exts = certInfo.getExtensions();
             if (exts != null) {
                 printExtensions(rb.getString("Extensions."), exts, out);
             }
@@ -3796,9 +3806,12 @@ public final class Main {
         throws IOException, CertificateException
     {
         if (rfc) {
-            out.println(X509Factory.BEGIN_CERT);
-            out.println(Base64.getMimeEncoder(64, CRLF).encodeToString(cert.getEncoded()));
-            out.println(X509Factory.END_CERT);
+            out.print(X509Factory.BEGIN_CERT);
+            out.print("\r\n");
+            out.print(Base64.getMimeEncoder(64, CRLF).encodeToString(cert.getEncoded()));
+            out.print("\r\n");
+            out.print(X509Factory.END_CERT);
+            out.print("\r\n");
         } else {
             out.write(cert.getEncoded()); // binary
         }
@@ -4177,9 +4190,7 @@ public final class Main {
         // Try out each certificate in the vector, until we find one
         // whose public key verifies the signature of the certificate
         // in question.
-        for (Enumeration<Pair<String,X509Certificate>> issuerCerts = vec.elements();
-                issuerCerts.hasMoreElements(); ) {
-            Pair<String,X509Certificate> issuerCert = issuerCerts.nextElement();
+        for (Pair<String, X509Certificate> issuerCert : vec) {
             PublicKey issuerPubKey = issuerCert.snd.getPublicKey();
             try {
                 certToVerify.snd.verify(issuerPubKey);
@@ -4508,9 +4519,8 @@ public final class Main {
     }
 
     // Add an extension into a CertificateExtensions, always using OID as key
-    private static void setExt(CertificateExtensions result, Extension ex)
-            throws IOException {
-        result.set(ex.getId(), ex);
+    private static void setExt(CertificateExtensions result, Extension ex) {
+        result.setExtension(ex.getId(), ex);
     }
 
     /**
@@ -4570,7 +4580,7 @@ public final class Main {
                 // translate to all-OID first.
                 CertificateExtensions request2 = new CertificateExtensions();
                 for (sun.security.x509.Extension ex: requestedEx.getAllExtensions()) {
-                    request2.set(ex.getId(), ex);
+                    request2.setExtension(ex.getId(), ex);
                 }
                 for(String extstr: extstrs) {
                     if (extstr.toLowerCase(Locale.ENGLISH).startsWith("honored=")) {
@@ -4611,7 +4621,7 @@ public final class Main {
                             }
                             String n = findOidForExtName(type).toString();
                             if (add) {
-                                Extension e = request2.get(n);
+                                Extension e = request2.getExtension(n);
                                 if (!e.isCritical() && action == 0
                                         || e.isCritical() && action == 1) {
                                     e = Extension.newExtension(
@@ -4653,6 +4663,9 @@ public final class Main {
                     continue;
                 }
                 int exttype = oneOf(name, extSupported);
+                if (exttype != -1 && value != null && value.isEmpty()) {
+                    throw new Exception(rb.getString("Illegal.value.") + extstr);
+                }
                 switch (exttype) {
                     case 0:     // BC
                         int pathLen = -1;
@@ -5082,6 +5095,16 @@ public final class Main {
         }
     }
 
+    private void checkWeakConstraint(String label, String keyAlg,
+            SecretKeyConstraintsParameters skcp) {
+        try {
+            LEGACY_CHECK.permits(keyAlg, skcp, false);
+        } catch (CertPathValidatorException e) {
+            weakWarnings.add(String.format(
+                    rb.getString("key.algorithm.weak"), label, keyAlg));
+        }
+    }
+
     private void checkWeak(String label, CRL crl, Key key) {
         if (crl instanceof X509CRLImpl impl) {
             checkWeak(label, impl.getSigAlgName(), key);
@@ -5246,7 +5269,7 @@ public final class Main {
         if (debug) {
             throw new RuntimeException("NO BIG ERROR, SORRY");
         } else {
-            System.exit(1);
+            throw new ExitException(1);
         }
     }
 
@@ -5314,13 +5337,15 @@ class Pair<A, B> {
         return "Pair[" + fst + "," + snd + "]";
     }
 
-    public boolean equals(Object other) {
+    @Override
+    public boolean equals(Object obj) {
         return
-            other instanceof Pair &&
-            Objects.equals(fst, ((Pair)other).fst) &&
-            Objects.equals(snd, ((Pair)other).snd);
+            obj instanceof Pair<?, ?> other &&
+            Objects.equals(fst, other.fst) &&
+            Objects.equals(snd, other.snd);
     }
 
+    @Override
     public int hashCode() {
         if (fst == null) return (snd == null) ? 0 : snd.hashCode() + 1;
         else if (snd == null) return fst.hashCode() + 2;

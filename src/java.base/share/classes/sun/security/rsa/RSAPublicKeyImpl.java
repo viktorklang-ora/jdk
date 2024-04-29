@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -26,6 +26,8 @@
 package sun.security.rsa;
 
 import java.io.IOException;
+import java.io.InvalidObjectException;
+import java.io.ObjectInputStream;
 import java.math.BigInteger;
 
 import java.security.*;
@@ -39,7 +41,7 @@ import sun.security.rsa.RSAUtil.KeyType;
 
 /**
  * RSA public key implementation for "RSA", "RSASSA-PSS" algorithms.
- *
+ * <p>
  * Note: RSA keys must be at least 512 bits long
  *
  * @see RSAPrivateCrtKeyImpl
@@ -126,19 +128,14 @@ public final class RSAPublicKeyImpl extends X509Key implements RSAPublicKey {
         this.type = type;
         this.keyParams = keyParams;
 
-        try {
-            // generate the key encoding
-            DerOutputStream out = new DerOutputStream();
-            out.putInteger(n);
-            out.putInteger(e);
-            byte[] keyArray =
+        // generate the key encoding
+        DerOutputStream out = new DerOutputStream();
+        out.putInteger(n);
+        out.putInteger(e);
+        byte[] keyArray =
                 new DerValue(DerValue.tag_Sequence,
-                             out.toByteArray()).toByteArray();
-            setKey(new BitArray(keyArray.length*8, keyArray));
-        } catch (IOException exc) {
-            // should never occur
-            throw new InvalidKeyException(exc);
-        }
+                        out.toByteArray()).toByteArray();
+        setKey(new BitArray(keyArray.length * 8, keyArray));
     }
 
     /**
@@ -238,10 +235,26 @@ public final class RSAPublicKeyImpl extends X509Key implements RSAPublicKey {
     }
 
     @java.io.Serial
-    protected Object writeReplace() throws java.io.ObjectStreamException {
+    private Object writeReplace() throws java.io.ObjectStreamException {
         return new KeyRep(KeyRep.Type.PUBLIC,
                         getAlgorithm(),
                         getFormat(),
                         getEncoded());
+    }
+
+    /**
+     * Restores the state of this object from the stream.
+     * <p>
+     * Deserialization of this object is not supported.
+     *
+     * @param  stream the {@code ObjectInputStream} from which data is read
+     * @throws IOException if an I/O error occurs
+     * @throws ClassNotFoundException if a serialized class cannot be loaded
+     */
+    @java.io.Serial
+    private void readObject(ObjectInputStream stream)
+            throws IOException, ClassNotFoundException {
+        throw new InvalidObjectException(
+                "RSAPublicKeyImpl keys are not directly deserializable");
     }
 }

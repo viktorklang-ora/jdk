@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -110,6 +110,8 @@ import static sun.security.util.ResourcesMgr.getAuthResourceString;
  *      privateKeyPasswordURL must not be specified.</dd>
  *
  * </dl>
+ *
+ * @since 1.4
  */
 public class KeyStoreLoginModule implements LoginModule {
 
@@ -393,7 +395,7 @@ public class KeyStoreLoginModule implements LoginModule {
         }
         InputStream in = null;
         try {
-            in = new URL(keyStorePasswordURL).openStream();
+            in = newURL(keyStorePasswordURL).openStream();
             keyStorePassword = Password.readPassword(in);
         } catch (IOException e) {
             LoginException le = new LoginException
@@ -421,7 +423,7 @@ public class KeyStoreLoginModule implements LoginModule {
         } else {
             InputStream in = null;
             try {
-                in = new URL(privateKeyPasswordURL).openStream();
+                in = newURL(privateKeyPasswordURL).openStream();
                 privateKeyPassword = Password.readPassword(in);
             } catch (IOException e) {
                 LoginException le = new LoginException
@@ -599,7 +601,7 @@ public class KeyStoreLoginModule implements LoginModule {
                 // if using protected auth path, keyStorePassword will be null
                 keyStore.load(null, keyStorePassword);
             } else {
-                in = new URL(keyStoreURL).openStream();
+                in = newURL(keyStoreURL).openStream();
                 keyStore.load(in, keyStorePassword);
             }
         } catch (MalformedURLException e) {
@@ -910,5 +912,10 @@ public class KeyStoreLoginModule implements LoginModule {
         } else {
             System.err.println("Debug KeyStoreLoginModule: " + message);
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private static URL newURL(String spec) throws MalformedURLException {
+        return new URL(spec);
     }
 }

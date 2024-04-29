@@ -52,6 +52,7 @@ public class GeneralNames {
      * @param derVal the DerValue to construct the GeneralNames from.
      * @exception IOException on error.
      */
+    @SuppressWarnings("this-escape")
     public GeneralNames(DerValue derVal) throws IOException {
         this();
         if (derVal.tag != DerValue.tag_Sequence) {
@@ -109,9 +110,8 @@ public class GeneralNames {
      * Write the extension to the DerOutputStream.
      *
      * @param out the DerOutputStream to write the extension to.
-     * @exception IOException on error.
      */
-    public void encode(DerOutputStream out) throws IOException {
+    public void encode(DerOutputStream out) {
         if (isEmpty()) {
             return;
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2014, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -52,6 +52,7 @@ import com.sun.source.util.TreePathScanner;
 import com.sun.source.util.Trees;
 import com.sun.tools.javac.api.JavacScope;
 import com.sun.tools.javac.code.Flags;
+import com.sun.tools.javac.code.Symbol;
 import com.sun.tools.javac.code.Symbol.CompletionFailure;
 import com.sun.tools.javac.code.Symbol.VarSymbol;
 import com.sun.tools.javac.code.Symtab;
@@ -1031,7 +1032,7 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
             case DECLARED: {
                 TypeElement element = (TypeElement) at.getTypes().asElement(site);
                 List<Element> result = new ArrayList<>();
-                result.addAll(at.getElements().getAllMembers(element));
+                result.addAll(membersOf(at, element));
                 if (shouldGenerateDotClassItem) {
                     result.add(createDotClassSymbol(at, site));
                 }
@@ -1068,6 +1069,10 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
             }
             case ARRAY: {
                 List<Element> result = new ArrayList<>();
+                TypeElement jlObject = at.getElements().getTypeElement("java.lang.Object");
+                if (jlObject != null) {
+                    result.addAll(membersOf(at, jlObject));
+                }
                 result.add(createArrayLengthSymbol(at, site));
                 if (shouldGenerateDotClassItem)
                     result.add(createDotClassSymbol(at, site));
@@ -1076,6 +1081,17 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
             default:
                 return Collections.emptyList();
         }
+    }
+
+    private List<? extends Element> membersOf(AnalyzeTask at, TypeElement element) {
+        return at.getElements().getAllMembers(element).stream().map(m ->
+            element.equals(m.getEnclosingElement())
+                ? m
+                : (m instanceof Symbol.MethodSymbol ms)
+                    ? ms.clone((Symbol)element)
+                    : (m instanceof Symbol.VarSymbol vs)
+                        ? vs.clone((Symbol)element)
+                        : m).toList();
     }
 
     private List<? extends Element> membersOf(AnalyzeTask at, List<? extends Element> elements) {
@@ -1180,10 +1196,10 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
             }
         };
         @SuppressWarnings("unchecked")
-        List<Element> result = Util.stream(scopeIterable)
+        Set<Element> result = Util.stream(scopeIterable)
                              .flatMap(this::localElements)
                              .flatMap(el -> Util.stream((Iterable<Element>)elementConvertor.apply(el)))
-                             .collect(toCollection(ArrayList :: new));
+                             .collect(toCollection(LinkedHashSet :: new));
         result.addAll(listPackages(at, ""));
         return result;
     }
@@ -1680,6 +1696,11 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
         return availableSources = result;
     }
 
+    private Element getOriginalEnclosingElement(Element el) {
+        if (el instanceof Symbol s) el = s.baseSymbol();
+        return el.getEnclosingElement();
+    }
+
     private String elementHeader(AnalyzeTask at, Element el, boolean includeParameterNames, boolean useFQN) {
         switch (el.getKind()) {
             case ANNOTATION_TYPE: case CLASS: case ENUM: case INTERFACE, RECORD: {
@@ -1730,9 +1751,9 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                                 .collect(joining(" & "));
             }
             case FIELD:
-                return appendDot(elementHeader(at, el.getEnclosingElement(), includeParameterNames, false)) + el.getSimpleName() + ":" + el.asType();
+                return appendDot(elementHeader(at, getOriginalEnclosingElement(el), includeParameterNames, false)) + el.getSimpleName() + ":" + el.asType();
             case ENUM_CONSTANT:
-                return appendDot(elementHeader(at, el.getEnclosingElement(), includeParameterNames, false)) + el.getSimpleName();
+                return appendDot(elementHeader(at, getOriginalEnclosingElement(el), includeParameterNames, false)) + el.getSimpleName();
             case EXCEPTION_PARAMETER: case LOCAL_VARIABLE: case PARAMETER: case RESOURCE_VARIABLE:
                 return el.getSimpleName() + ":" + el.asType();
             case CONSTRUCTOR: case METHOD: {
@@ -1753,7 +1774,7 @@ class SourceCodeAnalysisImpl extends SourceCodeAnalysis {
                 }
 
                 // receiver type
-                String clazz = elementHeader(at, el.getEnclosingElement(), includeParameterNames, false);
+                String clazz = elementHeader(at, getOriginalEnclosingElement(el), includeParameterNames, false);
                 header.append(clazz);
 
                 if (isMethod) {

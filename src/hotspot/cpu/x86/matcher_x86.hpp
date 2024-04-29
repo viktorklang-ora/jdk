@@ -97,14 +97,14 @@
   }
 
   // Prefer ConN+DecodeN over ConP.
-  static const bool const_oop_prefer_decode() {
+  static bool const_oop_prefer_decode() {
     NOT_LP64(ShouldNotCallThis();)
     // Prefer ConN+DecodeN over ConP.
     return true;
   }
 
   // Prefer ConP over ConNKlass+DecodeNKlass.
-  static const bool const_klass_prefer_decode() {
+  static bool const_klass_prefer_decode() {
     NOT_LP64(ShouldNotCallThis();)
     return false;
   }
@@ -154,6 +154,16 @@
     return (UseAVX >= 2);
   }
 
+  // Does target support predicated operation emulation.
+  static bool supports_vector_predicate_op_emulation(int vopc, int vlen, BasicType bt) {
+    switch(vopc) {
+      case Op_LoadVectorGatherMasked:
+        return is_subword_type(bt) && VM_Version::supports_avx2();
+      default:
+        return false;
+    }
+  }
+
   // Does the CPU supports vector variable rotate instructions?
   static constexpr bool supports_vector_variable_rotates(void) {
     return true;
@@ -165,12 +175,12 @@
   }
 
   // Does the CPU supports vector unsigned comparison instructions?
-  static const bool supports_vector_comparison_unsigned(int vlen, BasicType bt) {
+  static constexpr bool supports_vector_comparison_unsigned(int vlen, BasicType bt) {
     return true;
   }
 
   // Some microarchitectures have mask registers used on vectors
-  static const bool has_predicated_vectors(void) {
+  static bool has_predicated_vectors(void) {
     return VM_Version::supports_evex();
   }
 
@@ -182,6 +192,25 @@
 
   // Implements a variant of EncodeISOArrayNode that encode ASCII only
   static const bool supports_encode_ascii_array = true;
+
+  // Without predicated input, an all-one vector is needed for the alltrue vector test
+  static constexpr bool vectortest_needs_second_argument(bool is_alltrue, bool is_predicate) {
+    return is_alltrue && !is_predicate;
+  }
+
+  // BoolTest mask for vector test intrinsics
+  static constexpr BoolTest::mask vectortest_mask(bool is_alltrue, bool is_predicate, int vlen) {
+    if (!is_alltrue) {
+      return BoolTest::ne;
+    }
+    if (!is_predicate) {
+      return BoolTest::lt;
+    }
+    if ((vlen == 8 && !VM_Version::supports_avx512dq()) || vlen < 8) {
+      return BoolTest::eq;
+    }
+    return BoolTest::lt;
+  }
 
   // Returns pre-selection estimated size of a vector operation.
   // Currently, it's a rudimentary heuristic based on emitted code size for complex
@@ -195,6 +224,9 @@
         return 7;
       case Op_MulVL:
         return VM_Version::supports_avx512vldq() ? 0 : 6;
+      case Op_LoadVectorGather:
+      case Op_LoadVectorGatherMasked:
+        return is_subword_type(ety) ? 50 : 0;
       case Op_VectorCastF2X: // fall through
       case Op_VectorCastD2X:
         return is_floating_point_type(ety) ? 0 : (is_subword_type(ety) ? 35 : 30);
@@ -226,6 +258,19 @@
       case Op_RoundD: {
         return 30;
       }
+    }
+  }
+
+  // Is SIMD sort supported for this CPU?
+  static bool supports_simd_sort(BasicType bt) {
+    if (VM_Version::supports_avx512dq()) {
+      return true;
+    }
+    else if (VM_Version::supports_avx2() && !is_double_word_type(bt)) {
+      return true;
+    }
+    else {
+      return false;
     }
   }
 

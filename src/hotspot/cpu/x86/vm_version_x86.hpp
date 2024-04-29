@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -223,7 +223,9 @@ class VM_Version : public Abstract_VM_Version {
                avx512dq : 1,
                         : 1,
                     adx : 1,
-                        : 3,
+                        : 1,
+             avx512ifma : 1,
+                        : 1,
              clflushopt : 1,
                    clwb : 1,
                         : 1,
@@ -246,7 +248,7 @@ class VM_Version : public Abstract_VM_Version {
                      ospke : 1,
                            : 1,
               avx512_vbmi2 : 1,
-                           : 1,
+                    cet_ss : 1,
                       gfni : 1,
                       vaes : 1,
          avx512_vpclmulqdq : 1,
@@ -271,7 +273,18 @@ class VM_Version : public Abstract_VM_Version {
         fast_short_rep_mov : 1,
                            : 9,
                  serialize : 1,
-                           : 17;
+                           : 5,
+                   cet_ibt : 1,
+                           : 11;
+    } bits;
+  };
+
+  union SefCpuid7Ecx1Eax {
+    uint32_t value;
+    struct {
+      uint32_t             : 23,
+                  avx_ifma : 1,
+                           : 8;
     } bits;
   };
 
@@ -309,6 +322,11 @@ protected:
   static address   _cpuinfo_segv_addr; // address of instruction which causes SEGV
   static address   _cpuinfo_cont_addr; // address of instruction after the one which causes SEGV
 
+  /*
+   * Update following files when declaring new flags:
+   * test/lib-test/jdk/test/whitebox/CPUInfoTest.java
+   * src/jdk.internal.vm.ci/share/classes/jdk.vm.ci.amd64/src/jdk/vm/ci/amd64/AMD64.java
+   */
   enum Feature_Flag : uint64_t {
 #define CPU_FEATURE_FLAGS(decl) \
     decl(CX8,               "cx8",               0)  /*  next bits are from cpuid 1 (EDX) */ \
@@ -376,7 +394,13 @@ protected:
     decl(FSRM,              "fsrm",              50) /* Fast Short REP MOV */ \
     decl(GFNI,              "gfni",              51) /* Vector GFNI instructions */ \
     decl(AVX512_BITALG,     "avx512_bitalg",     52) /* Vector sub-word popcount and bit gather instructions */\
-    decl(F16C,              "f16c",              53) /* Half-precision and single precision FP conversion instructions*/
+    decl(F16C,              "f16c",              53) /* Half-precision and single precision FP conversion instructions*/ \
+    decl(PKU,               "pku",               54) /* Protection keys for user-mode pages */ \
+    decl(OSPKE,             "ospke",             55) /* OS enables protection keys */ \
+    decl(CET_IBT,           "cet_ibt",           56) /* Control Flow Enforcement - Indirect Branch Tracking */ \
+    decl(CET_SS,            "cet_ss",            57) /* Control Flow Enforcement - Shadow Stack */ \
+    decl(AVX512_IFMA,       "avx512_ifma",       58) /* Integer Vector FMA instructions*/ \
+    decl(AVX_IFMA,          "avx_ifma",          59) /* 256-bit VEX-coded variant of AVX512-IFMA*/
 
 #define DECLARE_CPU_FEATURE_FLAG(id, name, bit) CPU_##id = (1ULL << bit),
     CPU_FEATURE_FLAGS(DECLARE_CPU_FEATURE_FLAG)
@@ -414,7 +438,8 @@ protected:
   //
   // The info block is laid out in subblocks of 4 dwords corresponding to
   // eax, ebx, ecx and edx, whether or not they contain anything useful.
-  struct CpuidInfo {
+  class CpuidInfo {
+  public:
     // cpuid function 0
     uint32_t std_max_function;
     uint32_t std_vendor_name_0;
@@ -434,10 +459,13 @@ protected:
     uint32_t     dcp_cpuid4_edx; // unused currently
 
     // cpuid function 7 (structured extended features)
+    // ECX = 0 before calling cpuid()
     SefCpuid7Eax sef_cpuid7_eax;
     SefCpuid7Ebx sef_cpuid7_ebx;
     SefCpuid7Ecx sef_cpuid7_ecx;
     SefCpuid7Edx sef_cpuid7_edx;
+    // ECX = 1 before calling cpuid()
+    SefCpuid7Ecx1Eax sef_cpuid7_ecx1_eax;
 
     // cpuid function 0xB (processor topology)
     // ecx = 0
@@ -508,6 +536,31 @@ protected:
 
     // Space to save zmm registers after signal handle
     int          zmm_save[16*4]; // Save zmm0, zmm7, zmm8, zmm31
+
+    uint64_t feature_flags() const;
+
+    // Asserts
+    void assert_is_initialized() const {
+      assert(std_cpuid1_eax.bits.family != 0, "VM_Version not initialized");
+    }
+
+    // Extractors
+    uint32_t extended_cpu_family() const {
+      uint32_t result = std_cpuid1_eax.bits.family;
+      result += std_cpuid1_eax.bits.ext_family;
+      return result;
+    }
+
+    uint32_t extended_cpu_model() const {
+      uint32_t result = std_cpuid1_eax.bits.model;
+      result |= std_cpuid1_eax.bits.ext_model << 4;
+      return result;
+    }
+
+    uint32_t cpu_stepping() const {
+      uint32_t result = std_cpuid1_eax.bits.stepping;
+      return result;
+    }
   };
 
 private:
@@ -515,23 +568,6 @@ private:
   static CpuidInfo _cpuid_info;
 
   // Extractors and predicates
-  static uint32_t extended_cpu_family() {
-    uint32_t result = _cpuid_info.std_cpuid1_eax.bits.family;
-    result += _cpuid_info.std_cpuid1_eax.bits.ext_family;
-    return result;
-  }
-
-  static uint32_t extended_cpu_model() {
-    uint32_t result = _cpuid_info.std_cpuid1_eax.bits.model;
-    result |= _cpuid_info.std_cpuid1_eax.bits.ext_model << 4;
-    return result;
-  }
-
-  static uint32_t cpu_stepping() {
-    uint32_t result = _cpuid_info.std_cpuid1_eax.bits.stepping;
-    return result;
-  }
-
   static uint logical_processor_count() {
     uint result = threads_per_core();
     return result;
@@ -539,7 +575,6 @@ private:
 
   static bool compute_has_intel_jcc_erratum();
 
-  static uint64_t feature_flags();
   static bool os_supports_avx_vectors();
   static void get_processor_features();
 
@@ -549,6 +584,7 @@ public:
   static ByteSize std_cpuid1_offset() { return byte_offset_of(CpuidInfo, std_cpuid1_eax); }
   static ByteSize dcp_cpuid4_offset() { return byte_offset_of(CpuidInfo, dcp_cpuid4_eax); }
   static ByteSize sef_cpuid7_offset() { return byte_offset_of(CpuidInfo, sef_cpuid7_eax); }
+  static ByteSize sef_cpuid7_ecx1_offset() { return byte_offset_of(CpuidInfo, sef_cpuid7_ecx1_eax); }
   static ByteSize ext_cpuid1_offset() { return byte_offset_of(CpuidInfo, ext_cpuid1_eax); }
   static ByteSize ext_cpuid5_offset() { return byte_offset_of(CpuidInfo, ext_cpuid5_eax); }
   static ByteSize ext_cpuid7_offset() { return byte_offset_of(CpuidInfo, ext_cpuid7_eax); }
@@ -580,11 +616,6 @@ public:
   // Override Abstract_VM_Version implementation
   static void print_platform_virtualization_info(outputStream*);
 
-  // Asserts
-  static void assert_is_initialized() {
-    assert(_cpuid_info.std_cpuid1_eax.bits.family != 0, "VM_Version not initialized");
-  }
-
   //
   // Processor family:
   //       3   -  386
@@ -600,6 +631,10 @@ public:
   //       processors.  Use the feature test functions below to
   //       determine whether a particular instruction is supported.
   //
+  static void     assert_is_initialized() { _cpuid_info.assert_is_initialized(); }
+  static uint32_t extended_cpu_family()   { return _cpuid_info.extended_cpu_family(); }
+  static uint32_t extended_cpu_model()    { return _cpuid_info.extended_cpu_model(); }
+  static uint32_t cpu_stepping()          { return _cpuid_info.cpu_stepping(); }
   static int  cpu_family()        { return _cpu;}
   static bool is_P6()             { return cpu_family() >= 6; }
   static bool is_amd()            { assert_is_initialized(); return _cpuid_info.std_vendor_name_0 == 0x68747541; } // 'htuA'
@@ -619,17 +654,16 @@ public:
 
   static uint cores_per_cpu();
   static uint threads_per_core();
-  static intx L1_line_size();
+  static uint L1_line_size();
 
-  static intx prefetch_data_size()  {
+  static uint prefetch_data_size()  {
     return L1_line_size();
   }
 
   //
-  // Feature identification
+  // Feature identification which can be affected by VM settings
   //
   static bool supports_cpuid()        { return _features  != 0; }
-  static bool supports_cmpxchg8()     { return (_features & CPU_CX8) != 0; }
   static bool supports_cmov()         { return (_features & CPU_CMOV) != 0; }
   static bool supports_fxsr()         { return (_features & CPU_FXSR) != 0; }
   static bool supports_ht()           { return (_features & CPU_HT) != 0; }
@@ -656,6 +690,8 @@ public:
   static bool supports_adx()          { return (_features & CPU_ADX) != 0; }
   static bool supports_evex()         { return (_features & CPU_AVX512F) != 0; }
   static bool supports_avx512dq()     { return (_features & CPU_AVX512DQ) != 0; }
+  static bool supports_avx512ifma()   { return (_features & CPU_AVX512_IFMA) != 0; }
+  static bool supports_avxifma()      { return (_features & CPU_AVX_IFMA) != 0; }
   static bool supports_avx512pf()     { return (_features & CPU_AVX512PF) != 0; }
   static bool supports_avx512er()     { return (_features & CPU_AVX512ER) != 0; }
   static bool supports_avx512cd()     { return (_features & CPU_AVX512CD) != 0; }
@@ -684,6 +720,15 @@ public:
   static bool supports_hv()           { return (_features & CPU_HV) != 0; }
   static bool supports_serialize()    { return (_features & CPU_SERIALIZE) != 0; }
   static bool supports_f16c()         { return (_features & CPU_F16C) != 0; }
+  static bool supports_pku()          { return (_features & CPU_PKU) != 0; }
+  static bool supports_ospke()        { return (_features & CPU_OSPKE) != 0; }
+  static bool supports_cet_ss()       { return (_features & CPU_CET_SS) != 0; }
+  static bool supports_cet_ibt()      { return (_features & CPU_CET_IBT) != 0; }
+
+  //
+  // Feature identification not affected by VM flags
+  //
+  static bool cpu_supports_evex()     { return (_cpu_features & CPU_AVX512F) != 0; }
 
   // Intel features
   static bool is_intel_family_core() { return is_intel() &&
@@ -691,6 +736,13 @@ public:
 
   static bool is_intel_skylake() { return is_intel_family_core() &&
                                           extended_cpu_model() == CPU_MODEL_SKYLAKE; }
+
+#ifdef COMPILER2
+  // Determine if it's running on Cascade Lake using default options.
+  static bool is_default_intel_cascade_lake();
+#endif
+
+  static bool is_intel_cascade_lake();
 
   static int avx3_threshold();
 
@@ -724,21 +776,38 @@ public:
 
   static bool supports_compare_and_exchange() { return true; }
 
-  static intx allocate_prefetch_distance(bool use_watermark_prefetch);
+  static int allocate_prefetch_distance(bool use_watermark_prefetch);
 
   // SSE2 and later processors implement a 'pause' instruction
   // that can be used for efficient implementation of
   // the intrinsic for java.lang.Thread.onSpinWait()
   static bool supports_on_spin_wait() { return supports_sse2(); }
 
-  // x86_64 supports fast class initialization checks for static methods.
+  // x86_64 supports fast class initialization checks
   static bool supports_fast_class_init_checks() {
+    return LP64_ONLY(true) NOT_LP64(false); // not implemented on x86_32
+  }
+
+  // x86_64 supports secondary supers table
+  constexpr static bool supports_secondary_supers_table() {
     return LP64_ONLY(true) NOT_LP64(false); // not implemented on x86_32
   }
 
   constexpr static bool supports_stack_watermark_barrier() {
     return true;
   }
+
+  constexpr static bool supports_recursive_lightweight_locking() {
+    return true;
+  }
+
+  // For AVX CPUs only. f16c support is disabled if UseAVX == 0.
+  static bool supports_float16() {
+    return supports_f16c() || supports_avx512vl();
+  }
+
+  // Check intrinsic support
+  static bool is_intrinsic_supported(vmIntrinsicID id);
 
   // there are several insns to force cache line sync to memory which
   // we can use to ensure mapped non-volatile memory is up to date with

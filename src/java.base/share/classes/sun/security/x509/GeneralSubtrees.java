@@ -43,7 +43,7 @@ import sun.security.util.*;
  * @author Hemma Prafullchandra
  * @author Andreas Sterbenz
  */
-public class GeneralSubtrees implements Cloneable {
+public class GeneralSubtrees implements Cloneable, DerEncoder {
 
     private final List<GeneralSubtree> trees;
 
@@ -70,6 +70,7 @@ public class GeneralSubtrees implements Cloneable {
      *
      * @param val the DER encoded form of the same.
      */
+    @SuppressWarnings("this-escape")
     public GeneralSubtrees(DerValue val) throws IOException {
         this();
         if (val.tag != DerValue.tag_Sequence) {
@@ -132,7 +133,8 @@ public class GeneralSubtrees implements Cloneable {
      *
      * @param out the DerOutputStream to encode this object to.
      */
-    public void encode(DerOutputStream out) throws IOException {
+    @Override
+    public void encode(DerOutputStream out) {
         DerOutputStream seq = new DerOutputStream();
 
         for (int i = 0, n = size(); i < n; i++) {
@@ -253,7 +255,7 @@ public class GeneralSubtrees implements Cloneable {
                 newName = new GeneralName(new DNSName(""));
                 break;
             case GeneralNameInterface.NAME_X400:
-                newName = new GeneralName(new X400Address((byte[])null));
+                newName = new GeneralName(new X400Address(null));
                 break;
             case GeneralNameInterface.NAME_DIRECTORY:
                 newName = new GeneralName(new X500Name(""));

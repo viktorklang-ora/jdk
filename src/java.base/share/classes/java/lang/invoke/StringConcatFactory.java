@@ -27,10 +27,14 @@ package java.lang.invoke;
 
 import jdk.internal.access.JavaLangAccess;
 import jdk.internal.access.SharedSecrets;
+import jdk.internal.javac.PreviewFeature;
 import jdk.internal.vm.annotation.Stable;
 import sun.invoke.util.Wrapper;
 
 import java.lang.invoke.MethodHandles.Lookup;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 
 import static java.lang.invoke.MethodType.methodType;
@@ -321,6 +325,7 @@ public final class StringConcatFactory {
     {
         Objects.requireNonNull(lookup, "Lookup is null");
         Objects.requireNonNull(name, "Name is null");
+        Objects.requireNonNull(recipe, "Recipe is null");
         Objects.requireNonNull(concatType, "Concat type is null");
         Objects.requireNonNull(constants, "Constants are null");
 
@@ -488,14 +493,12 @@ public final class StringConcatFactory {
             // Use int as the logical type for subword integral types
             // (byte and short). char and boolean require special
             // handling so don't change the logical type of those
-            if (cl == byte.class || cl == short.class) {
-                ptypes[i] = int.class;
-            }
+            ptypes[i] = promoteToIntType(ptypes[i]);
             // Object, float and double will be eagerly transformed
             // into a (non-null) String as a first step after invocation.
             // Set up to use String as the logical type for such arguments
             // internally.
-            else if (cl == Object.class) {
+            if (cl == Object.class) {
                 if (objFilters == null) {
                     objFilters = new MethodHandle[ptypes.length];
                 }
@@ -664,7 +667,6 @@ public final class StringConcatFactory {
         return argPositions;
     }
 
-
     private static MethodHandle foldInLastMixers(MethodHandle mh, long initialLengthCoder, int pos, Class<?>[] ptypes, int count) {
         MethodHandle mix = switch (count) {
             case 1 -> mixer(ptypes[pos]);
@@ -691,19 +693,12 @@ public final class StringConcatFactory {
     // Simple prependers, single argument. May be used directly or as a
     // building block for complex prepender combinators.
     private static MethodHandle prepender(String prefix, Class<?> cl) {
-        MethodHandle prepend;
-        int idx = classIndex(cl);
-        if (prefix == null) {
-            prepend = NULL_PREPENDERS[idx];
-            if (prepend == null) {
-                NULL_PREPENDERS[idx] = prepend = MethodHandles.insertArguments(
-                                prepender(cl), 3, (String)null);
-            }
+        if (prefix == null || prefix.isEmpty()) {
+            return noPrefixPrepender(cl);
         } else {
-            prepend = MethodHandles.insertArguments(
+            return MethodHandles.insertArguments(
                     prepender(cl), 3, prefix);
         }
-        return prepend;
     }
 
     private static MethodHandle prepender(Class<?> cl) {
@@ -717,6 +712,17 @@ public final class StringConcatFactory {
         return prepend;
     }
 
+    private static MethodHandle noPrefixPrepender(Class<?> cl) {
+        int idx = classIndex(cl);
+        MethodHandle prepend = NO_PREFIX_PREPENDERS[idx];
+        if (prepend == null) {
+            NO_PREFIX_PREPENDERS[idx] = prepend = JLA.stringConcatHelper("prepend",
+                    methodType(long.class, long.class, byte[].class,
+                            Wrapper.asPrimitiveType(cl))).rebind();
+        }
+        return prepend;
+    }
+
     private static final int INT_IDX = 0,
             CHAR_IDX = 1,
             LONG_IDX = 2,
@@ -724,11 +730,11 @@ public final class StringConcatFactory {
             STRING_IDX = 4,
             TYPE_COUNT = 5;
     private static int classIndex(Class<?> cl) {
-        if (cl == String.class)  return STRING_IDX;
-        if (cl == int.class)     return INT_IDX;
-        if (cl == boolean.class) return BOOLEAN_IDX;
-        if (cl == char.class)    return CHAR_IDX;
-        if (cl == long.class)    return LONG_IDX;
+        if (cl == String.class)                          return STRING_IDX;
+        if (cl == int.class)                             return INT_IDX;
+        if (cl == boolean.class)                         return BOOLEAN_IDX;
+        if (cl == char.class)                            return CHAR_IDX;
+        if (cl == long.class)                            return LONG_IDX;
         throw new IllegalArgumentException("Unexpected class: " + cl);
     }
 
@@ -981,10 +987,37 @@ public final class StringConcatFactory {
         }
     }
 
-    private static final @Stable MethodHandle[] NULL_PREPENDERS = new MethodHandle[TYPE_COUNT];
+    private static final @Stable MethodHandle[] NO_PREFIX_PREPENDERS = new MethodHandle[TYPE_COUNT];
     private static final @Stable MethodHandle[] PREPENDERS      = new MethodHandle[TYPE_COUNT];
     private static final @Stable MethodHandle[] MIXERS          = new MethodHandle[TYPE_COUNT];
     private static final long INITIAL_CODER = JLA.stringConcatInitialCoder();
+
+    /**
+     * Promote integral types to int.
+     */
+    private static Class<?> promoteToIntType(Class<?> t) {
+        // use int for subword integral types; still need special mixers
+        // and prependers for char, boolean
+        return t == byte.class || t == short.class ? int.class : t;
+    }
+
+    /**
+     * Returns a stringifier for references and floats/doubles only.
+     * Always returns null for other primitives.
+     *
+     * @param t class to stringify
+     * @return stringifier; null, if not available
+     */
+    private static MethodHandle stringifierFor(Class<?> t) {
+        if (t == Object.class) {
+            return objectStringifier();
+        } else if (t == float.class) {
+            return floatStringifier();
+        } else if (t == double.class) {
+            return doubleStringifier();
+        }
+        return null;
+    }
 
     private static MethodHandle stringValueOf(Class<?> ptype) {
         try {
@@ -998,4 +1031,5 @@ public final class StringConcatFactory {
     private StringConcatFactory() {
         // no instantiation
     }
+
 }

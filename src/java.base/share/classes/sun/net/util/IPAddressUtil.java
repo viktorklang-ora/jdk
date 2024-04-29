@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2004, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2004, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -134,20 +134,39 @@ public class IPAddressUtil {
      * If string can't be parsed by following IETF IPv4 address string literals
      * formatting style rules (default one), but can be parsed by following BSD formatting
      * style rules, the IPv4 address string content is treated as ambiguous and
-     * {@code IllegalArgumentException} is thrown.
+     * either {@code IllegalArgumentException} is thrown, or {@code null} is returned.
      *
      * @param src input string
+     * @param throwIAE {@code true} - throw {@code IllegalArgumentException} when cannot be parsed
+     *                            as IPv4 address string;
+     *                 {@code false} - throw {@code IllegalArgumentException} only when IPv4 address
+     *                            string is ambiguous.
      * @return bytes array if string is a valid IPv4 address string
      * @throws IllegalArgumentException if "jdk.net.allowAmbiguousIPAddressLiterals" SP is set to
-     *                                  "false" and IPv4 address string {@code "src"} is ambiguous
+     *                                  {@code false}, IPv4 address string {@code src} is ambiguous,
+     *                                  or when address string cannot be parsed as an IPv4 address
+     *                                  string and {@code throwIAE} is set to {@code true}.
      */
-    public static byte[] validateNumericFormatV4(String src) {
+    public static byte[] validateNumericFormatV4(String src, boolean throwIAE) {
         byte[] parsedBytes = textToNumericFormatV4(src);
         if (!ALLOW_AMBIGUOUS_IPADDRESS_LITERALS_SP_VALUE
                 && parsedBytes == null && isBsdParsableV4(src)) {
-            throw new IllegalArgumentException("Invalid IP address literal: " + src);
+            throw invalidIpAddressLiteral(src);
+        }
+        if (parsedBytes == null && throwIAE) {
+            throw invalidIpAddressLiteral(src);
         }
         return parsedBytes;
+    }
+
+    /**
+     * Creates {@code IllegalArgumentException} with invalid IP address literal message.
+     *
+     * @param src address literal string to include to the exception message
+     * @return an {@code IllegalArgumentException} instance
+     */
+    public static IllegalArgumentException invalidIpAddressLiteral(String src) {
+        return new IllegalArgumentException("Invalid IP address literal: " + src);
     }
 
     /*
@@ -427,6 +446,16 @@ public class IPAddressUtil {
     // All of the above
     private static final long L_EXCLUDE = 0x84008008ffffffffL;
     private static final long H_EXCLUDE = 0x8000000038000001L;
+    // excluded delims: "<>\" " - we don't include % and # here
+    private static final long L_EXCLUDED_DELIMS = 0x5000000500000000L;
+    private static final long H_EXCLUDED_DELIMS = 0x0L;
+    // unwise "{}|\\^[]`";
+    private static final long L_UNWISE = 0x0L;
+    private static final long H_UNWISE = 0x3800000178000000L;
+    private static final long L_FRAGMENT = 0x0000000800000000L;
+    private static final long H_FRAGMENT = 0x0L;
+    private static final long L_QUERY = 0x8000000000000000L;
+    private static final long H_QUERY = 0x0L;
 
     private static final char[] OTHERS = {
             8263,8264,8265,8448,8449,8453,8454,10868,
@@ -479,10 +508,14 @@ public class IPAddressUtil {
         return "'" + c + "'";
     }
 
-    private static String checkUserInfo(String str) {
+    // Check user-info component.
+    // This method returns an error message if a problem
+    // is found. The caller is expected to use that message to
+    // throw an exception.
+    public static String checkUserInfo(String str) {
         // colon is permitted in user info
-        int index = scan(str, L_EXCLUDE & ~L_COLON,
-                H_EXCLUDE & ~H_COLON);
+        int index = scan(str, MASKS.L_USERINFO_MASK,
+                MASKS.H_USERINFO_MASK);
         if (index >= 0) {
             return "Illegal character found in user-info: "
                     + describeChar(str.charAt(index));
@@ -498,8 +531,7 @@ public class IPAddressUtil {
                 index = str.indexOf('%');
                 if (index >= 0) {
                     index = scan(str = str.substring(index),
-                            L_NON_PRINTABLE | L_IPV6_DELIMS,
-                            H_NON_PRINTABLE | H_IPV6_DELIMS);
+                            MASKS.L_SCOPE_MASK, MASKS.H_SCOPE_MASK);
                     if (index >= 0) {
                         return "Illegal character found in IPv6 scoped address: "
                                 + describeChar(str.charAt(index));
@@ -509,7 +541,8 @@ public class IPAddressUtil {
             }
             return "Unrecognized IPv6 address format";
         } else {
-            index = scan(str, L_EXCLUDE, H_EXCLUDE);
+            index = scan(str, L_EXCLUDE | MASKS.L_HOSTNAME_MASK,
+                    H_EXCLUDE | MASKS.H_HOSTNAME_MASK, OTHERS);
             if (index >= 0) {
                 return "Illegal character found in host: "
                         + describeChar(str.charAt(index));
@@ -518,7 +551,14 @@ public class IPAddressUtil {
         return null;
     }
 
-    private static String checkAuth(String str) {
+    // Simple checks for the authority component.
+    // Deeper checks on the various parts of a server-based
+    // authority component may be performed by calling
+    // #checkAuthority(URL url)
+    // This method returns an error message if a problem
+    // is found. The caller is expected to use that message to
+    // throw an exception.
+    public static String checkAuth(String str) {
         int index = scan(str,
                 L_EXCLUDE & ~L_AUTH_DELIMS,
                 H_EXCLUDE & ~H_AUTH_DELIMS);
@@ -529,8 +569,11 @@ public class IPAddressUtil {
         return null;
     }
 
-    // check authority of hierarchical URL. Appropriate for
-    // HTTP-like protocol handlers
+    // check authority of hierarchical (server based) URL.
+    // Appropriate for HTTP-like protocol handlers
+    // This method returns an error message if a problem
+    // is found. The caller is expected to use that message to
+    // throw an exception.
     public static String checkAuthority(URL url) {
         String s, u, h;
         if (url == null) return null;
@@ -546,33 +589,53 @@ public class IPAddressUtil {
         return null;
     }
 
-    // minimal syntax checks - deeper check may be performed
-    // by the appropriate protocol handler
+    // minimal syntax checks if delayed parsing is
+    // enabled - deeper check will be performed
+    // later by the appropriate protocol handler
+    // This method returns an error message if a problem
+    // is found. The caller is expected to use that message to
+    // throw an exception.
     public static String checkExternalForm(URL url) {
         String s;
         if (url == null) return null;
-        int index = scan(s = url.getUserInfo(),
-                L_NON_PRINTABLE | L_SLASH,
-                H_NON_PRINTABLE | H_SLASH);
-        if (index >= 0) {
-            return "Illegal character found in authority: "
-                    + describeChar(s.charAt(index));
+        boolean earlyURLParsing = earlyURLParsing();
+        String userInfo = url.getUserInfo();
+        if (earlyURLParsing) {
+            if ((s = checkUserInfo(userInfo)) != null) return s;
+        } else {
+            int index = scan(s = userInfo,
+                    L_NON_PRINTABLE | L_SLASH,
+                    H_NON_PRINTABLE | H_SLASH);
+            if (index >= 0) {
+                return "Illegal character found in authority: "
+                        + describeChar(s.charAt(index));
+            }
         }
-        if ((s = checkHostString(url.getHost())) != null) {
+        String host = url.getHost();
+        if ((s = checkHostString(host)) != null) {
             return s;
         }
         return null;
     }
 
+    // Check host component.
+    // This method returns an error message if a problem
+    // is found. The caller is expected to use that message to
+    // throw an exception.
     public static String checkHostString(String host) {
         if (host == null) return null;
-        int index = scan(host,
-                L_NON_PRINTABLE | L_SLASH,
-                H_NON_PRINTABLE | H_SLASH,
-                OTHERS);
-        if (index >= 0) {
-            return "Illegal character found in host: "
-                    + describeChar(host.charAt(index));
+        if (earlyURLParsing()) {
+            // also validate IPv6 literal format if present
+            return checkHost(host);
+        } else {
+            int index = scan(host,
+                    MASKS.L_HOSTNAME_MASK,
+                    MASKS.H_HOSTNAME_MASK,
+                    OTHERS);
+            if (index >= 0) {
+                return "Illegal character found in host: "
+                        + describeChar(host.charAt(index));
+            }
         }
         return null;
     }
@@ -785,7 +848,7 @@ public class IPAddressUtil {
     }
 
     // Parse ASCII digit in given radix
-    private static int parseAsciiDigit(char c, int radix) {
+    public static int parseAsciiDigit(char c, int radix) {
         assert radix == OCTAL || radix == DECIMAL || radix == HEXADECIMAL;
         if (radix == HEXADECIMAL) {
             return parseAsciiHexDigit(c);
@@ -803,6 +866,14 @@ public class IPAddressUtil {
         return parseAsciiDigit(c, DECIMAL);
     }
 
+    public static boolean earlyURLParsing() {
+        return !MASKS.DELAY_URL_PARSING_SP_VALUE;
+    }
+
+    public static boolean delayURLParsing() {
+        return MASKS.DELAY_URL_PARSING_SP_VALUE;
+    }
+
     // Supported radixes
     private static final int HEXADECIMAL = 16;
     private static final int DECIMAL = 10;
@@ -811,10 +882,39 @@ public class IPAddressUtil {
     private static final int[] SUPPORTED_RADIXES = new int[]{HEXADECIMAL, OCTAL, DECIMAL};
 
     // BSD parser's return values
-    private final static long CANT_PARSE_IN_RADIX = -1L;
-    private final static long TERMINAL_PARSE_ERROR = -2L;
+    private static final long CANT_PARSE_IN_RADIX = -1L;
+    private static final long TERMINAL_PARSE_ERROR = -2L;
 
     private static final String ALLOW_AMBIGUOUS_IPADDRESS_LITERALS_SP = "jdk.net.allowAmbiguousIPAddressLiterals";
     private static final boolean ALLOW_AMBIGUOUS_IPADDRESS_LITERALS_SP_VALUE = Boolean.valueOf(
             GetPropertyAction.privilegedGetProperty(ALLOW_AMBIGUOUS_IPADDRESS_LITERALS_SP, "false"));
+    private static class MASKS {
+        private static final String DELAY_URL_PARSING_SP = "jdk.net.url.delayParsing";
+        private static final boolean DELAY_URL_PARSING_SP_VALUE;
+        static final long L_USERINFO_MASK = L_EXCLUDE & ~L_COLON;
+        static final long H_USERINFO_MASK = H_EXCLUDE & ~H_COLON;
+        static final long L_HOSTNAME_MASK;
+        static final long H_HOSTNAME_MASK;
+        static final long L_SCOPE_MASK;
+        static final long H_SCOPE_MASK;
+        static {
+            var value = GetPropertyAction.privilegedGetProperty(
+                    DELAY_URL_PARSING_SP, "false");
+            DELAY_URL_PARSING_SP_VALUE = value.isEmpty()
+                    || Boolean.parseBoolean(value);
+            if (DELAY_URL_PARSING_SP_VALUE) {
+                L_HOSTNAME_MASK = L_NON_PRINTABLE | L_SLASH;
+                H_HOSTNAME_MASK = H_NON_PRINTABLE | H_SLASH;
+                L_SCOPE_MASK = L_NON_PRINTABLE | L_IPV6_DELIMS;
+                H_SCOPE_MASK = H_NON_PRINTABLE | H_IPV6_DELIMS;
+            } else {
+                // the hostname mask can also forbid [ ] brackets, because IPv6 should be
+                // checked early before the mask is used when earlier parsing checks are performed
+                L_HOSTNAME_MASK = L_NON_PRINTABLE | L_SLASH | L_UNWISE | L_EXCLUDED_DELIMS;
+                H_HOSTNAME_MASK = H_NON_PRINTABLE | H_SLASH | H_UNWISE | H_EXCLUDED_DELIMS;
+                L_SCOPE_MASK = L_NON_PRINTABLE | L_IPV6_DELIMS | L_SLASH | L_BACKSLASH | L_FRAGMENT | L_QUERY;
+                H_SCOPE_MASK = H_NON_PRINTABLE | H_IPV6_DELIMS | H_SLASH | H_BACKSLASH | H_FRAGMENT | H_QUERY;
+            }
+        }
+    }
 }

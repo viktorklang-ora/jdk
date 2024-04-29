@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,81 +24,27 @@
 
 package com.sun.hotspot.igv.coordinator.actions;
 
-import com.sun.hotspot.igv.coordinator.FolderNode;
 import com.sun.hotspot.igv.coordinator.OutlineTopComponent;
-import com.sun.hotspot.igv.data.Folder;
-import com.sun.hotspot.igv.data.GraphDocument;
-import com.sun.hotspot.igv.data.Group;
-import com.sun.hotspot.igv.data.serialization.Printer;
-import com.sun.hotspot.igv.settings.Settings;
-import java.io.*;
 import javax.swing.Action;
-import javax.swing.JFileChooser;
-import org.openide.nodes.Node;
 import org.openide.util.HelpCtx;
+import org.openide.util.ImageUtilities;
 import org.openide.util.NbBundle;
-import org.openide.util.actions.CookieAction;
-import org.openide.util.actions.NodeAction;
+import org.openide.util.actions.CallableSystemAction;
 
 /**
  *
  * @author Thomas Wuerthinger
  */
-public final class SaveAsAction extends NodeAction {
+public final class SaveAsAction extends CallableSystemAction {
 
     public SaveAsAction() {
-        putValue(Action.SHORT_DESCRIPTION, "Save selected groups to XML file...");
+        putValue(Action.SHORT_DESCRIPTION, "Save as...");
+        putValue(Action.SMALL_ICON, ImageUtilities.loadImageIcon(iconResource(), true));
     }
 
     @Override
-    protected void performAction(Node[] activatedNodes) {
-        final OutlineTopComponent component = OutlineTopComponent.findInstance();
-        GraphDocument doc = new GraphDocument();
-        for (Node node : activatedNodes) {
-            if (node instanceof FolderNode) {
-                FolderNode folderNode = (FolderNode) node;
-                Folder folder = folderNode.getFolder();
-                if (folder instanceof Group) {
-                    Group group = (Group) folder;
-                    doc.addElement(group);
-                }
-            }
-        }
-        save(doc);
-    }
-
-    public static void save(GraphDocument doc) {
-        JFileChooser fc = new JFileChooser();
-        fc.setFileFilter(ImportAction.getFileFilter());
-        fc.setCurrentDirectory(new File(Settings.get().get(Settings.DIRECTORY, Settings.DIRECTORY_DEFAULT)));
-
-        if (fc.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
-            File file = fc.getSelectedFile();
-            if (!file.getName().contains(".")) {
-                file = new File(file.getAbsolutePath() + ".xml");
-            }
-
-            File dir = file;
-            if (!dir.isDirectory()) {
-                dir = dir.getParentFile();
-            }
-            Settings.get().put(Settings.DIRECTORY, dir.getAbsolutePath());
-            try {
-                try (Writer writer = new OutputStreamWriter(new FileOutputStream(file))) {
-                    Printer p = new Printer();
-                    p.export(writer, doc);
-                }
-            } catch (FileNotFoundException e) {
-                e.printStackTrace();
-            } catch (IOException e) {
-                e.printStackTrace();
-
-            }
-        }
-    }
-
-    protected int mode() {
-        return CookieAction.MODE_SOME;
+    public void performAction() {
+        OutlineTopComponent.findInstance().saveAs();
     }
 
     @Override
@@ -108,7 +54,7 @@ public final class SaveAsAction extends NodeAction {
 
     @Override
     protected String iconResource() {
-        return "com/sun/hotspot/igv/coordinator/images/save.png";
+        return "com/sun/hotspot/igv/coordinator/images/save_as.gif";
     }
 
     @Override
@@ -118,19 +64,6 @@ public final class SaveAsAction extends NodeAction {
 
     @Override
     protected boolean asynchronous() {
-        return false;
-    }
-
-    @Override
-    protected boolean enable(Node[] nodes) {
-        if (nodes.length > 0) {
-            for (Node n : nodes) {
-                if (!(n instanceof FolderNode) || ((FolderNode) n).isRootNode()) {
-                    return false;
-                }
-            }
-            return true;
-        }
         return false;
     }
 }

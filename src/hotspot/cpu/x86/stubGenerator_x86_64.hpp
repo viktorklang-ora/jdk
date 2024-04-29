@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -99,6 +99,10 @@ class StubGenerator: public StubCodeGenerator {
 
   address generate_fp_mask(const char *stub_name, int64_t mask);
 
+  address generate_compress_perm_table(const char *stub_name, int32_t esize);
+
+  address generate_expand_perm_table(const char *stub_name, int32_t esize);
+
   address generate_vector_mask(const char *stub_name, int64_t mask);
 
   address generate_vector_byte_perm_mask(const char *stub_name);
@@ -122,11 +126,11 @@ class StubGenerator: public StubCodeGenerator {
   void array_overlap_test(address no_overlap_target, Label* NOLp, Address::ScaleFactor sf);
 
   void array_overlap_test(address no_overlap_target, Address::ScaleFactor sf) {
-    assert(no_overlap_target != NULL, "must be generated");
-    array_overlap_test(no_overlap_target, NULL, sf);
+    assert(no_overlap_target != nullptr, "must be generated");
+    array_overlap_test(no_overlap_target, nullptr, sf);
   }
   void array_overlap_test(Label& L_no_overlap, Address::ScaleFactor sf) {
-    array_overlap_test(NULL, &L_no_overlap, sf);
+    array_overlap_test(nullptr, &L_no_overlap, sf);
   }
 
 
@@ -140,19 +144,23 @@ class StubGenerator: public StubCodeGenerator {
 
   // This is used in places where r10 is a scratch register, and can
   // be adapted if r9 is needed also.
-  void setup_arg_regs_using_thread();
+  void setup_arg_regs_using_thread(int nargs = 3);
 
   void restore_arg_regs_using_thread();
 
   // Copy big chunks forward
   void copy_bytes_forward(Register end_from, Register end_to,
-                          Register qword_count, Register to,
-                          Label& L_copy_bytes, Label& L_copy_8_bytes);
+                          Register qword_count, Register tmp1,
+                          Register tmp2, Label& L_copy_bytes,
+                          Label& L_copy_8_bytes, DecoratorSet decorators,
+                          BasicType type);
 
   // Copy big chunks backward
   void copy_bytes_backward(Register from, Register dest,
-                           Register qword_count, Register to,
-                           Label& L_copy_bytes, Label& L_copy_8_bytes);
+                           Register qword_count, Register tmp1,
+                           Register tmp2, Label& L_copy_bytes,
+                           Label& L_copy_8_bytes, DecoratorSet decorators,
+                           BasicType type);
 
   void setup_argument_regs(BasicType type);
 
@@ -183,10 +191,19 @@ class StubGenerator: public StubCodeGenerator {
                                     Register index, Register temp,
                                     bool use64byteVector, Label& L_entry, Label& L_exit);
 
+  void arraycopy_avx3_special_cases_256(XMMRegister xmm, KRegister mask, Register from,
+                                    Register to, Register count, int shift,
+                                    Register index, Register temp, Label& L_exit);
+
   void arraycopy_avx3_special_cases_conjoint(XMMRegister xmm, KRegister mask, Register from,
                                              Register to, Register start_index, Register end_index,
                                              Register count, int shift, Register temp,
                                              bool use64byteVector, Label& L_entry, Label& L_exit);
+
+  void arraycopy_avx3_large(Register to, Register from, Register temp1, Register temp2,
+                            Register temp3, Register temp4, Register count,
+                            XMMRegister xmm1, XMMRegister xmm2, XMMRegister xmm3,
+                            XMMRegister xmm4, int shift);
 
   void copy32_avx(Register dst, Register src, Register index, XMMRegister xmm,
                   int shift = Address::times_1, int offset = 0);
@@ -194,6 +211,9 @@ class StubGenerator: public StubCodeGenerator {
   void copy64_avx(Register dst, Register src, Register index, XMMRegister xmm,
                   bool conjoint, int shift = Address::times_1, int offset = 0,
                   bool use64byteVector = false);
+
+  void copy256_avx3(Register dst, Register src, Register index, XMMRegister xmm1, XMMRegister xmm2,
+                                XMMRegister xmm3, XMMRegister xmm4, int shift, int offset = 0);
 
   void copy64_masked_avx(Register dst, Register src, XMMRegister xmm,
                          KRegister mask, Register length, Register index,
@@ -247,6 +267,14 @@ class StubGenerator: public StubCodeGenerator {
   address generate_unsafe_copy(const char *name,
                                address byte_copy_entry, address short_copy_entry,
                                address int_copy_entry, address long_copy_entry);
+
+  // Generate 'unsafe' set memory stub
+  // Though just as safe as the other stubs, it takes an unscaled
+  // size_t argument instead of an element count.
+  //
+  // Examines the alignment of the operands and dispatches
+  // to an int, short, or byte copy loop.
+  address generate_unsafe_setmemory(const char *name, address byte_copy_entry);
 
   // Perform range checks on the proposed arraycopy.
   // Kills temp, but nothing else.
@@ -323,6 +351,10 @@ class StubGenerator: public StubCodeGenerator {
   void aesgcm_encrypt(Register in, Register len, Register ct, Register out, Register key,
                       Register state, Register subkeyHtbl, Register avx512_subkeyHtbl, Register counter);
 
+  // AVX2 AES Galois Counter Mode implementation
+  address generate_avx2_galoisCounterMode_AESCrypt();
+  void aesgcm_avx2(Register in, Register len, Register ct, Register out, Register key,
+                   Register state, Register subkeyHtbl, Register counter);
 
  // Vector AES Counter implementation
   address generate_counterMode_VectorAESCrypt();
@@ -349,6 +381,17 @@ class StubGenerator: public StubCodeGenerator {
                                   XMMRegister aad_hashx, Register in, Register out, Register data, Register pos, bool reduction,
                                   XMMRegister addmask, bool no_ghash_input, Register rounds, Register ghash_pos,
                                   bool final_reduction, int index, XMMRegister counter_inc_mask);
+  // AVX2 AES-GCM related functions
+  void initial_blocks_avx2(XMMRegister ctr, Register rounds, Register key, Register len,
+                           Register in, Register out, Register ct, XMMRegister aad_hashx, Register pos);
+  void gfmul_avx2(XMMRegister GH, XMMRegister HK);
+  void generateHtbl_8_block_avx2(Register htbl);
+  void ghash8_encrypt8_parallel_avx2(Register key, Register subkeyHtbl, XMMRegister ctr_blockx, Register in,
+                                     Register out, Register ct, Register pos, bool out_order, Register rounds,
+                                     XMMRegister xmm1, XMMRegister xmm2, XMMRegister xmm3, XMMRegister xmm4,
+                                     XMMRegister xmm5, XMMRegister xmm6, XMMRegister xmm7, XMMRegister xmm8);
+  void ghash_last_8_avx2(Register subkeyHtbl);
+
   // Load key and shuffle operation
   void ev_load_key(XMMRegister xmmdst, Register key, int offset, XMMRegister xmm_shuf_mask);
   void ev_load_key(XMMRegister xmmdst, Register key, int offset, Register rscratch);
@@ -360,7 +403,8 @@ class StubGenerator: public StubCodeGenerator {
 
   // Utility routine for increase 128bit counter (iv in CTR mode)
   void inc_counter(Register reg, XMMRegister xmmdst, int inc_delta, Label& next_block);
-
+  void ev_add128(XMMRegister xmmdst, XMMRegister xmmsrc1, XMMRegister xmmsrc2,
+                 int vector_len, KRegister ktmp, XMMRegister ones);
   void generate_aes_stubs();
 
 
@@ -387,6 +431,57 @@ class StubGenerator: public StubCodeGenerator {
   // Ghash single and multi block operations using AVX instructions
   address generate_avx_ghash_processBlocks();
 
+  // ChaCha20 stubs and helper functions
+  void generate_chacha_stubs();
+  address generate_chacha20Block_avx();
+  address generate_chacha20Block_avx512();
+  void cc20_quarter_round_avx(XMMRegister aVec, XMMRegister bVec,
+    XMMRegister cVec, XMMRegister dVec, XMMRegister scratch,
+    XMMRegister lrot8, XMMRegister lrot16, int vector_len);
+  void cc20_shift_lane_org(XMMRegister bVec, XMMRegister cVec,
+    XMMRegister dVec, int vector_len, bool colToDiag);
+  void cc20_keystream_collate_avx512(XMMRegister aVec, XMMRegister bVec,
+    XMMRegister cVec, XMMRegister dVec, Register baseAddr, int baseOffset);
+
+  // Poly1305 multiblock using IFMA instructions
+  address generate_poly1305_processBlocks();
+  void poly1305_process_blocks_avx512(const Register input, const Register length,
+                                      const Register A0, const Register A1, const Register A2,
+                                      const Register R0, const Register R1, const Register C1);
+  void poly1305_multiply_scalar(const Register a0, const Register a1, const Register a2,
+                                const Register r0, const Register r1, const Register c1, bool only128,
+                                const Register t0, const Register t1, const Register t2,
+                                const Register mulql, const Register mulqh);
+  void poly1305_multiply8_avx512(const XMMRegister A0, const XMMRegister A1, const XMMRegister A2,
+                                 const XMMRegister R0, const XMMRegister R1, const XMMRegister R2, const XMMRegister R1P, const XMMRegister R2P,
+                                 const XMMRegister P0L, const XMMRegister P0H, const XMMRegister P1L, const XMMRegister P1H, const XMMRegister P2L, const XMMRegister P2H,
+                                 const XMMRegister TMP, const Register rscratch);
+  void poly1305_limbs(const Register limbs, const Register a0, const Register a1, const Register a2, const Register t0, const Register t1);
+  void poly1305_limbs_out(const Register a0, const Register a1, const Register a2, const Register limbs, const Register t0, const Register t1);
+  void poly1305_limbs_avx512(const XMMRegister D0, const XMMRegister D1,
+                             const XMMRegister L0, const XMMRegister L1, const XMMRegister L2, bool padMSG,
+                             const XMMRegister TMP, const Register rscratch);
+  //Poly305 AVX2 implementation
+  void poly1305_process_blocks_avx2(const Register input, const Register length,
+    const Register a0, const Register a1, const Register a2,
+    const Register r0, const Register r1, const Register c1);
+  void poly1305_msg_mul_reduce_vec4_avx2(const XMMRegister A0, const XMMRegister A1, const XMMRegister A2,
+                                   const Address R0, const Address R1, const Address R2,
+                                   const Address R1P, const Address R2P,
+                                   const XMMRegister P0L, const XMMRegister P0H,
+                                   const XMMRegister P1L, const XMMRegister P1H,
+                                   const XMMRegister P2L, const XMMRegister P2H,
+                                   const XMMRegister YTMP1, const XMMRegister YTMP2,
+                                   const XMMRegister YTMP3, const XMMRegister YTMP4,
+                                   const XMMRegister YTMP5, const XMMRegister YTMP6,
+                                   const Register input, const Register length, const Register rscratch);
+  void poly1305_mul_reduce_vec4_avx2(const XMMRegister A0, const XMMRegister A1, const XMMRegister A2,
+                               const XMMRegister R0, const XMMRegister R1, const XMMRegister R2,
+                               const XMMRegister R1P, const XMMRegister R2P,
+                               const XMMRegister P0L, const XMMRegister P0H,
+                               const XMMRegister P1L, const XMMRegister P1H,
+                               const XMMRegister P2L, const XMMRegister P2H,
+                               const XMMRegister YTMP1, const Register rscratch);
 
   // BASE64 stubs
 
@@ -411,6 +506,8 @@ class StubGenerator: public StubCodeGenerator {
   address base64_vbmi_join_1_2_addr();
   address base64_vbmi_join_2_3_addr();
   address base64_decoding_table_addr();
+  address base64_AVX2_decode_tables_addr();
+  address base64_AVX2_decode_LUT_tables_addr();
 
   // Code for generating Base64 decoding.
   //
@@ -438,6 +535,8 @@ class StubGenerator: public StubCodeGenerator {
   address generate_bigIntegerRightShift();
   address generate_bigIntegerLeftShift();
 
+  address generate_float16ToFloat();
+  address generate_floatToFloat16();
 
   // Libm trigonometric stubs
 
@@ -448,6 +547,7 @@ class StubGenerator: public StubCodeGenerator {
   address generate_libmPow();
   address generate_libmLog();
   address generate_libmLog10();
+  address generate_libmFmod();
 
   // Shared constants
   static address ZERO;
@@ -481,12 +581,13 @@ class StubGenerator: public StubCodeGenerator {
   address generate_cont_returnBarrier_exception();
 
 #if INCLUDE_JFR
-
+  void generate_jfr_stubs();
   // For c2: c_rarg0 is junk, call to runtime to write a checkpoint.
   // It returns a jobject handle to the event writer.
   // The handle is dereferenced and the return value is the event writer oop.
   RuntimeStub* generate_jfr_write_checkpoint();
-
+  // For c2: call to runtime to return a buffer lease.
+  RuntimeStub* generate_jfr_return_lease();
 #endif // INCLUDE_JFR
 
   // Continuation point for throwing of implicit exceptions that are
@@ -509,24 +610,25 @@ class StubGenerator: public StubCodeGenerator {
                                    Register arg1 = noreg,
                                    Register arg2 = noreg);
 
+  // shared exception handler for FFM upcall stubs
+  address generate_upcall_stub_exception_handler();
+
+  // Specialized stub implementations for UseSecondarySupersTable.
+  address generate_lookup_secondary_supers_table_stub(u1 super_klass_index);
+
+  // Slow path implementation for UseSecondarySupersTable.
+  address generate_lookup_secondary_supers_table_slow_path_stub();
+
   void create_control_words();
 
   // Initialization
-  void generate_initial();
-  void generate_phase1();
-  void generate_all();
+  void generate_initial_stubs();
+  void generate_continuation_stubs();
+  void generate_compiler_stubs();
+  void generate_final_stubs();
 
  public:
-  StubGenerator(CodeBuffer* code, int phase) : StubCodeGenerator(code) {
-    DEBUG_ONLY( _regs_in_thread = false; )
-    if (phase == 0) {
-      generate_initial();
-    } else if (phase == 1) {
-      generate_phase1(); // stubs that must be available for the interpreter
-    } else {
-      generate_all();
-    }
-  }
+  StubGenerator(CodeBuffer* code, StubsKind kind);
 };
 
 #endif // CPU_X86_STUBGENERATOR_X86_64_HPP

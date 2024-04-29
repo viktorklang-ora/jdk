@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -142,8 +142,6 @@ NET_InetAddressToSockaddr(JNIEnv *env, jobject iaObj, int port,
 JNIEXPORT jobject JNICALL
 NET_SockaddrToInetAddress(JNIEnv *env, SOCKETADDRESS *sa, int *port);
 
-void platformInit();
-
 JNIEXPORT jint JNICALL NET_GetPortFromSockaddr(SOCKETADDRESS *sa);
 
 JNIEXPORT jboolean JNICALL
@@ -164,9 +162,6 @@ int NET_IsZeroAddr(jbyte* caddr);
  */
 
 JNIEXPORT int JNICALL
-NET_SocketAvailable(int fd, int *pbytes);
-
-JNIEXPORT int JNICALL
 NET_GetSockOpt(int fd, int level, int opt, void *result, int *len);
 
 JNIEXPORT int JNICALL
@@ -174,12 +169,6 @@ NET_SetSockOpt(int fd, int level, int opt, const void *arg, int len);
 
 JNIEXPORT int JNICALL
 NET_Bind(int fd, SOCKETADDRESS *sa, int len);
-
-JNIEXPORT int JNICALL
-NET_MapSocketOption(jint cmd, int *level, int *optname);
-
-JNIEXPORT int JNICALL
-NET_MapSocketOptionV6(jint cmd, int *level, int *optname);
 
 JNIEXPORT jint JNICALL
 NET_EnableFastTcpLoopback(int fd);

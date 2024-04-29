@@ -52,11 +52,10 @@ class ServiceThread : public JavaThread {
 
   // Add event to the service thread event queue.
   static void enqueue_deferred_event(JvmtiDeferredEvent* event);
-  static void add_oop_handle_release(OopHandle handle);
 
   // GC support
-  void oops_do_no_frames(OopClosure* f, CodeBlobClosure* cf);
-  void nmethods_do(CodeBlobClosure* cf);
+  void oops_do_no_frames(OopClosure* f, NMethodClosure* cf);
+  void nmethods_do(NMethodClosure* cf);
 };
 
 #endif // SHARE_RUNTIME_SERVICETHREAD_HPP

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2017, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -145,6 +145,9 @@ final class BootstrapMethodInvoker {
                 } else if (isLambdaMetafactoryAltMetafactoryBSM(bsmType)) {
                     maybeReBoxElements(argv);
                     result = (CallSite)bootstrapMethod.invokeExact(caller, name, (MethodType)type, argv);
+                } else if (isObjectMethodsBootstrapBSM(bsmType)) {
+                    MethodHandle[] mhs = Arrays.copyOfRange(argv, 2, argv.length, MethodHandle[].class);
+                    result = bootstrapMethod.invokeExact(caller, name, (TypeDescriptor)type, (Class<?>)argv[0], (String)argv[1], mhs);
                 } else {
                     maybeReBoxElements(argv);
                     if (type instanceof Class<?> c) {
@@ -188,7 +191,6 @@ final class BootstrapMethodInvoker {
             throw new BootstrapMethodError("bootstrap method initialization exception", ex);
         }
     }
-
 
     /**
      * If resultType is a reference type, do Class::cast on the result through
@@ -247,6 +249,9 @@ final class BootstrapMethodInvoker {
     private static final MethodType LMF_ALT_MT = MethodType.methodType(CallSite.class,
             Lookup.class, String.class, MethodType.class, Object[].class);
 
+    private static final MethodType OBJECT_METHODS_MT = MethodType.methodType(Object.class,
+            Lookup.class, String.class, TypeDescriptor.class, Class.class, String.class, MethodHandle[].class);
+
     private static final MethodType LMF_CONDY_MT = MethodType.methodType(Object.class,
             Lookup.class, String.class, Class.class, MethodType.class, MethodHandle.class, MethodType.class);
 
@@ -255,7 +260,7 @@ final class BootstrapMethodInvoker {
 
     /**
      * @return true iff the BSM method type exactly matches
-     *         {@see java.lang.invoke.StringConcatFactory#makeConcatWithConstants(MethodHandles.Lookup,
+     *         {@link java.lang.invoke.StringConcatFactory#makeConcatWithConstants(MethodHandles.Lookup,
      *                 String,MethodType,String,Object...))}
      */
     private static boolean isStringConcatFactoryBSM(MethodType bsmType) {
@@ -264,7 +269,7 @@ final class BootstrapMethodInvoker {
 
     /**
      * @return true iff the BSM method type exactly matches
-     *         {@see java.lang.invoke.LambdaMetafactory#metafactory(
+     *         {@link java.lang.invoke.LambdaMetafactory#metafactory(
      *          MethodHandles.Lookup,String,Class,MethodType,MethodHandle,MethodType)}
      */
     private static boolean isLambdaMetafactoryCondyBSM(MethodType bsmType) {
@@ -273,7 +278,7 @@ final class BootstrapMethodInvoker {
 
     /**
      * @return true iff the BSM method type exactly matches
-     *         {@see java.lang.invoke.LambdaMetafactory#metafactory(
+     *         {@link java.lang.invoke.LambdaMetafactory#metafactory(
      *          MethodHandles.Lookup,String,MethodType,MethodType,MethodHandle,MethodType)}
      */
     private static boolean isLambdaMetafactoryIndyBSM(MethodType bsmType) {
@@ -282,11 +287,20 @@ final class BootstrapMethodInvoker {
 
     /**
      * @return true iff the BSM method type exactly matches
-     *         {@see java.lang.invoke.LambdaMetafactory#altMetafactory(
+     *         {@link java.lang.invoke.LambdaMetafactory#altMetafactory(
      *          MethodHandles.Lookup,String,MethodType,Object[])}
      */
     private static boolean isLambdaMetafactoryAltMetafactoryBSM(MethodType bsmType) {
         return bsmType == LMF_ALT_MT;
+    }
+
+    /**
+     * @return true iff the BSM method type exactly matches
+     *         {@link java.lang.runtime.ObjectMethods#bootstrap(
+     *          MethodHandles.Lookup,String,TypeDescriptor,Class,String,MethodHandle[])}
+     */
+    private static boolean isObjectMethodsBootstrapBSM(MethodType bsmType) {
+        return bsmType == OBJECT_METHODS_MT;
     }
 
     /** The JVM produces java.lang.Integer values to box

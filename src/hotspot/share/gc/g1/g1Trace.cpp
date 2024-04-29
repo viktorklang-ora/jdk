@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -70,7 +70,7 @@ static void register_jfr_type_constants() {
 #endif
 
 void G1NewTracer::initialize() {
-  JFR_ONLY(register_jfr_type_constants());
+  JFR_ONLY(register_jfr_type_constants();)
 }
 
 void G1NewTracer::report_young_gc_pause(G1GCPauseType pause) {
@@ -145,9 +145,9 @@ void G1NewTracer::send_evacuation_info_event(G1EvacInfo* info) {
   EventEvacuationInformation e;
   if (e.should_commit()) {
     e.set_gcId(GCId::current());
-    e.set_cSetRegions(info->collectionset_regions());
-    e.set_cSetUsedBefore(info->collectionset_used_before());
-    e.set_cSetUsedAfter(info->collectionset_used_after());
+    e.set_cSetRegions(info->collection_set_regions());
+    e.set_cSetUsedBefore(info->collection_set_used_before());
+    e.set_cSetUsedAfter(info->collection_set_used_after());
     e.set_allocationRegions(info->allocation_regions());
     e.set_allocationRegionsUsedBefore(info->alloc_regions_used_before());
     e.set_allocationRegionsUsedAfter(info->alloc_regions_used_before() + info->bytes_used());

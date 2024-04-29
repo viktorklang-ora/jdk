@@ -25,6 +25,17 @@
 
 package sun.security.provider;
 
+import java.security.*;
+import java.io.*;
+import java.util.Properties;
+import java.util.Enumeration;
+import java.net.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Random;
+import sun.security.util.Debug;
+
 /**
  * This class generates seeds for the SHA1PRNG cryptographically strong
  * random number generator.
@@ -65,17 +76,6 @@ package sun.security.provider;
  * @author Joshua Bloch
  * @author Gadi Guy
  */
-
-import java.security.*;
-import java.io.*;
-import java.util.Properties;
-import java.util.Enumeration;
-import java.net.*;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Random;
-import sun.security.util.Debug;
 
 abstract class SeedGenerator {
 
@@ -504,6 +504,7 @@ abstract class SeedGenerator {
 
         @SuppressWarnings("removal")
         private void init() throws IOException {
+            @SuppressWarnings("deprecation")
             final URL device = new URL(deviceName);
             try {
                 seedStream = java.security.AccessController.doPrivileged

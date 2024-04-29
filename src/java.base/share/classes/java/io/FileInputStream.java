@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,7 +27,6 @@ package java.io;
 
 import java.nio.channels.FileChannel;
 import java.util.Arrays;
-import jdk.internal.misc.Blocker;
 import jdk.internal.util.ArraysSupport;
 import sun.nio.ch.FileChannelImpl;
 
@@ -41,19 +40,13 @@ import sun.nio.ch.FileChannelImpl;
  * {@code FileReader}.
  *
  * @apiNote
- * To release resources used by this stream {@link #close} should be called
- * directly or by try-with-resources. Subclasses are responsible for the cleanup
- * of resources acquired by the subclass.
- * Subclasses that override {@link #finalize} in order to perform cleanup
- * should be modified to use alternative cleanup mechanisms such as
- * {@link java.lang.ref.Cleaner} and remove the overriding {@code finalize} method.
+ * The {@link #close} method should be called to release resources used by this
+ * stream, either directly, or with the {@code try}-with-resources statement.
  *
  * @implSpec
- * If this FileInputStream has been subclassed and the {@link #close}
- * method has been overridden, the {@link #close} method will be
- * called when the FileInputStream is unreachable.
- * Otherwise, it is implementation specific how the resource cleanup described in
- * {@link #close} is performed.
+ * Subclasses are responsible for the cleanup of resources acquired by the subclass.
+ * Subclasses requiring that resource cleanup take place after a stream becomes
+ * unreachable should use {@link java.lang.ref.Cleaner} or some other mechanism.
  *
  * @author  Arthur van Hoff
  * @see     java.io.File
@@ -139,6 +132,7 @@ public class FileInputStream extends InputStream
      * @see        java.io.File#getPath()
      * @see        java.lang.SecurityManager#checkRead(java.lang.String)
      */
+    @SuppressWarnings("this-escape")
     public FileInputStream(File file) throws FileNotFoundException {
         String name = (file != null ? file.getPath() : null);
         @SuppressWarnings("removal")
@@ -183,6 +177,7 @@ public class FileInputStream extends InputStream
      *             file descriptor.
      * @see        SecurityManager#checkRead(java.io.FileDescriptor)
      */
+    @SuppressWarnings("this-escape")
     public FileInputStream(FileDescriptor fdObj) {
         @SuppressWarnings("removal")
         SecurityManager security = System.getSecurityManager();
@@ -214,12 +209,7 @@ public class FileInputStream extends InputStream
      * @param name the name of the file
      */
     private void open(String name) throws FileNotFoundException {
-        long comp = Blocker.begin();
-        try {
-            open0(name);
-        } finally {
-            Blocker.end(comp);
-        }
+        open0(name);
     }
 
     /**
@@ -232,12 +222,7 @@ public class FileInputStream extends InputStream
      */
     @Override
     public int read() throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return read0();
-        } finally {
-            Blocker.end(comp);
-        }
+        return read0();
     }
 
     private native int read0() throws IOException;
@@ -264,12 +249,7 @@ public class FileInputStream extends InputStream
      */
     @Override
     public int read(byte[] b) throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return readBytes(b, 0, b.length);
-        } finally {
-            Blocker.end(comp);
-        }
+        return readBytes(b, 0, b.length);
     }
 
     /**
@@ -288,12 +268,7 @@ public class FileInputStream extends InputStream
      */
     @Override
     public int read(byte[] b, int off, int len) throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return readBytes(b, off, len);
-        } finally {
-            Blocker.end(comp);
-        }
+        return readBytes(b, off, len);
     }
 
     @Override
@@ -392,26 +367,20 @@ public class FileInputStream extends InputStream
                 return transferred;
             }
         }
-        return transferred + super.transferTo(out);
+        try {
+            return Math.addExact(transferred, super.transferTo(out));
+        } catch (ArithmeticException ignore) {
+            return Long.MAX_VALUE;
+        }
     }
 
     private long length() throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return length0();
-        } finally {
-            Blocker.end(comp);
-        }
+        return length0();
     }
     private native long length0() throws IOException;
 
     private long position() throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return position0();
-        } finally {
-            Blocker.end(comp);
-        }
+        return position0();
     }
     private native long position0() throws IOException;
 
@@ -441,12 +410,7 @@ public class FileInputStream extends InputStream
      */
     @Override
     public long skip(long n) throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return skip0(n);
-        } finally {
-            Blocker.end(comp);
-        }
+        return skip0(n);
     }
 
     private native long skip0(long n) throws IOException;
@@ -470,12 +434,7 @@ public class FileInputStream extends InputStream
      */
     @Override
     public int available() throws IOException {
-        long comp = Blocker.begin();
-        try {
-            return available0();
-        } finally {
-            Blocker.end(comp);
-        }
+        return available0();
     }
 
     private native int available0() throws IOException;
@@ -490,14 +449,17 @@ public class FileInputStream extends InputStream
      * @apiNote
      * Overriding {@link #close} to perform cleanup actions is reliable
      * only when called directly or when called by try-with-resources.
-     * Do not depend on finalization to invoke {@code close};
-     * finalization is not reliable and is deprecated.
-     * If cleanup of native resources is needed, other mechanisms such as
-     * {@linkplain java.lang.ref.Cleaner} should be used.
+     *
+     * @implSpec
+     * Subclasses requiring that resource cleanup take place after a stream becomes
+     * unreachable should use the {@link java.lang.ref.Cleaner} mechanism.
+     *
+     * <p>
+     * If this stream has an associated channel then this method will close the
+     * channel, which in turn will close this stream. Subclasses that override
+     * this method should be prepared to handle possible reentrant invocation.
      *
      * @throws     IOException  {@inheritDoc}
-     *
-     * @revised 1.4
      */
     @Override
     public void close() throws IOException {
@@ -563,8 +525,8 @@ public class FileInputStream extends InputStream
             synchronized (this) {
                 fc = this.channel;
                 if (fc == null) {
-                    this.channel = fc = FileChannelImpl.open(fd, path, true,
-                        false, false, this);
+                    fc = FileChannelImpl.open(fd, path, true, false, false, false, this);
+                    this.channel = fc;
                     if (closed) {
                         try {
                             // possible race with close(), benign since

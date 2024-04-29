@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,10 @@
 
 package java.math;
 
+import static java.math.BigDecimal.INFLATED;
+import static java.math.BigInteger.LONG_MASK;
+import java.util.Arrays;
+
 /**
  * A class used to represent multiprecision integers that makes efficient
  * use of allocated space by allowing a number to occupy only part of
@@ -41,10 +45,6 @@ package java.math;
  * @author  Timothy Buktu
  * @since   1.3
  */
-
-import static java.math.BigDecimal.INFLATED;
-import static java.math.BigInteger.LONG_MASK;
-import java.util.Arrays;
 
 class MutableBigInteger {
     /**
@@ -1531,13 +1531,10 @@ class MutableBigInteger {
         quotient.intLen = limit;
         int[] q = quotient.value;
 
-
-        // Must insert leading 0 in rem if its length did not change
-        if (rem.intLen == nlen) {
-            rem.offset = 0;
-            rem.value[0] = 0;
-            rem.intLen++;
-        }
+        // Insert leading 0 in rem
+        rem.offset = 0;
+        rem.value[0] = 0;
+        rem.intLen++;
 
         int dh = divisor[0];
         long dhLong = dh & LONG_MASK;

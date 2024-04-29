@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -351,7 +351,7 @@ class RevocationChecker extends PKIXRevocationChecker {
     {
         if (debug != null) {
             debug.println("RevocationChecker.check: checking cert" +
-                "\n  SN: " + Debug.toHexString(xcert.getSerialNumber()) +
+                "\n  SN: " + Debug.toString(xcert.getSerialNumber()) +
                 "\n  Subject: " + xcert.getSubjectX500Principal() +
                 "\n  Issuer: " + xcert.getIssuerX500Principal());
         }
@@ -642,7 +642,7 @@ class RevocationChecker extends PKIXRevocationChecker {
             debug.println("RevocationChecker.checkApprovedCRLs() " +
                           "starting the final sweep...");
             debug.println("RevocationChecker.checkApprovedCRLs()" +
-                          " cert SN: " + sn.toString());
+                          " cert SN: " + Debug.toString(sn));
         }
 
         CRLReason reasonCode = CRLReason.UNSPECIFIED;
@@ -839,6 +839,9 @@ class RevocationChecker extends PKIXRevocationChecker {
         return false;
     }
 
+    private static final boolean[] ALL_REASONS =
+            {true, true, true, true, true, true, true, true, true};
+
     /**
      * Internal method that verifies a set of possible_crls,
      * and sees if each is approved, based on the cert.
@@ -848,11 +851,9 @@ class RevocationChecker extends PKIXRevocationChecker {
      * @param signFlag <code>true</code> if prevKey was trusted to sign CRLs
      * @param prevKey the public key of the issuer of cert
      * @param reasonsMask the reason code mask
-     * @param trustAnchors a <code>Set</code> of <code>TrustAnchor</code>s>
+     * @param anchors a <code>Set</code> of <code>TrustAnchor</code>s>
      * @return a collection of approved crls (or an empty collection)
      */
-    private static final boolean[] ALL_REASONS =
-        {true, true, true, true, true, true, true, true, true};
     private Collection<X509CRL> verifyPossibleCRLs(Set<X509CRL> crls,
                                                    X509Certificate cert,
                                                    PublicKey prevKey,
@@ -879,7 +880,7 @@ class RevocationChecker extends PKIXRevocationChecker {
                      null, null);
                 points = Collections.singletonList(point);
             } else {
-                points = ext.get(CRLDistributionPointsExtension.POINTS);
+                points = ext.getDistributionPoints();
             }
             Set<X509CRL> results = new HashSet<>();
             for (DistributionPoint point : points) {
@@ -965,6 +966,9 @@ class RevocationChecker extends PKIXRevocationChecker {
         }
     }
 
+    private static final boolean [] CRL_SIGN_USAGE =
+            { false, false, false, false, false, false, true };
+
     /**
      * Tries to find a CertPath that establishes a key that can be
      * used to verify the revocation status of a given certificate.
@@ -979,8 +983,6 @@ class RevocationChecker extends PKIXRevocationChecker {
      *                     establishment of this path.
      * @throws CertPathValidatorException on failure
      */
-    private static final boolean [] CRL_SIGN_USAGE =
-        { false, false, false, false, false, false, true };
     private void buildToNewKey(X509Certificate currCert,
                                PublicKey prevKey,
                                Set<X509Certificate> stackedCerts)
@@ -1179,7 +1181,7 @@ class RevocationChecker extends PKIXRevocationChecker {
         @Override
         public boolean match(Certificate cert) {
             if (!super.match(cert))
-                return(false);
+                return false;
 
             if (badKeySet.contains(cert.getPublicKey())) {
                 if (debug != null)

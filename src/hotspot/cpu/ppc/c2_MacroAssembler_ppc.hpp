@@ -28,8 +28,11 @@
 // C2_MacroAssembler contains high-level macros for C2
 
  public:
-  void emit_entry_barrier_stub(C2EntryBarrierStub* stub) {}
-  static int entry_barrier_stub_size() { return 0; }
+  // Code used by cmpFastLockLightweight and cmpFastUnlockLightweight mach instructions in .ad file.
+  void fast_lock_lightweight(ConditionRegister flag, Register obj, Register box,
+                             Register tmp1, Register tmp2, Register tmp3);
+  void fast_unlock_lightweight(ConditionRegister flag, Register obj, Register box,
+                               Register tmp1, Register tmp2, Register tmp3);
 
   // Intrinsics for CompactStrings
   // Compress char[] to byte[] by compressing 16 bytes at once.
